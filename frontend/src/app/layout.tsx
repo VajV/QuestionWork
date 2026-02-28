@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AuthProvider } from "@/context/AuthContext";
 
 export const metadata: Metadata = {
   title: "QuestionWork - IT Freelance Marketplace",
@@ -14,7 +15,9 @@ export default function RootLayout({
   return (
     <html lang="ru">
       <body className="bg-gray-900 text-white min-h-screen">
-        {children}
+        <AuthProvider>
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );

@@ -3,36 +3,58 @@
 import Card from "@/components/ui/Card";
 import ProgressBar from "@/components/ui/ProgressBar";
 
-interface Stats {
+/**
+ * Интерфейс для статистики пользователя
+ * Использует те же имена полей что и API (int, dex, cha)
+ */
+interface UserStats {
   int: number;
   dex: number;
   cha: number;
 }
 
 interface StatsPanelProps {
-  stats: Stats;
+  stats: UserStats;
 }
 
-const statIcons = {
+/**
+ * Иконки для каждой характеристики
+ */
+const statIcons: Record<keyof UserStats, string> = {
   int: '🧠',
   dex: '⚡',
   cha: '💬',
 };
 
-const statNames = {
+/**
+ * Названия характеристик на русском
+ */
+const statNames: Record<keyof UserStats, string> = {
   int: 'Интеллект',
   dex: 'Ловкость',
   cha: 'Харизма',
 };
 
-const statColors = {
-  int: 'blue' as const,
-  dex: 'green' as const,
-  cha: 'purple' as const,
+/**
+ * Цвета для прогресс-баров каждой характеристики
+ */
+const statColors: Record<keyof UserStats, 'blue' | 'green' | 'purple'> = {
+  int: 'blue',
+  dex: 'green',
+  cha: 'purple',
 };
 
+/**
+ * Компонент панели характеристик
+ * 
+ * @param props - Пропсы компонента
+ * @param props.stats - Объект со статами пользователя из API
+ * 
+ * @example
+ * <StatsPanel stats={{ int: 10, dex: 10, cha: 10 }} />
+ */
 export default function StatsPanel({ stats }: StatsPanelProps) {
-  // Максимальный стат для расчёта процента (база = 10)
+  // Максимальный стат для расчёта процента (база = 10, макс = 20 для начала)
   const maxStat = 20;
 
   return (
@@ -42,13 +64,17 @@ export default function StatsPanel({ stats }: StatsPanelProps) {
       </h3>
       
       <div className="space-y-4">
-        {(Object.keys(stats) as Array<keyof Stats>).map((statKey) => (
+        {/* Проходим по всем ключам статистики */}
+        {(Object.keys(stats) as Array<keyof UserStats>).map((statKey) => (
           <div key={statKey}>
+            {/* Заголовок статистики */}
             <div className="flex items-center gap-2 mb-1">
               <span className="text-xl">{statIcons[statKey]}</span>
               <span className="text-gray-300 flex-1">{statNames[statKey]}</span>
               <span className="text-white font-bold">{stats[statKey]}</span>
             </div>
+            
+            {/* Прогресс-бар статистики */}
             <ProgressBar
               value={stats[statKey]}
               max={maxStat}
@@ -59,7 +85,7 @@ export default function StatsPanel({ stats }: StatsPanelProps) {
         ))}
       </div>
 
-      {/* Подсказка */}
+      {/* Подсказка для пользователя */}
       <p className="text-gray-500 text-sm mt-4">
         💡 Статы растут с выполнением квестов и повышением уровня
       </p>
