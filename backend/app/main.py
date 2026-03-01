@@ -13,6 +13,7 @@ load_dotenv()
 
 from app.api.v1.api import api_router
 
+
 # Создаём FastAPI приложение
 app = FastAPI(
     title=os.getenv("APP_NAME", "QuestionWork"),
@@ -26,18 +27,20 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[os.getenv("FRONTEND_URL", "http://localhost:3000")],
     allow_credentials=True,
-    allow_methods=["*"],  # Разрешаем все методы (GET, POST, PUT, DELETE)
-    allow_headers=["*"],  # Разрешаем все заголовки
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # Подключаем роутеры
 app.include_router(api_router, prefix="/api/v1")
+
 
 # Health check endpoint
 @app.get("/health")
 async def health_check():
     """Проверка работоспособности API"""
     return {"status": "ok", "message": "QuestionWork API is running"}
+
 
 # Root endpoint
 @app.get("/")
@@ -51,9 +54,10 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "app.main:app",
         host=os.getenv("HOST", "127.0.0.1"),
         port=int(os.getenv("PORT", 8000)),
-        reload=os.getenv("DEBUG", "False") == "True"
+        reload=os.getenv("DEBUG", "False") == "True",
     )

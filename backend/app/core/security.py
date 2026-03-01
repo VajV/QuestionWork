@@ -5,11 +5,14 @@ JWT токены, хеширование паролей
 Используем bcrypt напрямую для совместимости
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
-from jose import jwt
+from jose import jwt, JWTError
 import bcrypt
+import logging
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -58,9 +61,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     to_encode = data.copy()
     
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
     
     to_encode.update({"exp": expire})
     
@@ -90,5 +93,9 @@ def decode_access_token(token: str) -> Optional[dict]:
             algorithms=[settings.JWT_ALGORITHM]
         )
         return payload
-    except Exception:
+    except JWTError as e:
+        logger.warning(f"Invalid JWT token: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error decoding token: {e}")
         return None

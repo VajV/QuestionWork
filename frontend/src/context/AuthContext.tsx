@@ -1,15 +1,27 @@
 /**
  * AuthContext - Контекст аутентификации
- * 
+ *
  * Управляет состоянием пользователя, токеном и функциями входа/выхода
  * Сохраняет токен в localStorage для сохранения сессии между перезагрузками
  */
 
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { login as apiLogin, register as apiRegister, logout as apiLogout, getUserProfile } from '@/lib/api';
-import type { UserProfile, LoginData, RegisterData } from '@/lib/api';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  ReactNode,
+} from "react";
+import {
+  login as apiLogin,
+  register as apiRegister,
+  logout as apiLogout,
+  getUserProfile,
+} from "@/lib/api";
+import type { UserProfile, LoginData, RegisterData } from "@/lib/api";
 
 // ============================================
 // Типы контекста
@@ -21,10 +33,14 @@ interface AuthContextType {
   token: string | null;
   isAuthenticated: boolean;
   loading: boolean;
-  
+
   // Действия
-  login: (credentials: LoginData) => Promise<{ success: boolean; error?: string }>;
-  register: (data: RegisterData) => Promise<{ success: boolean; error?: string }>;
+  login: (
+    credentials: LoginData,
+  ) => Promise<{ success: boolean; error?: string }>;
+  register: (
+    data: RegisterData,
+  ) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -33,8 +49,8 @@ interface AuthContextType {
 // Константы
 // ============================================
 
-const STORAGE_KEY_TOKEN = 'questionwork_token';
-const STORAGE_KEY_USER = 'questionwork_user';
+const STORAGE_KEY_TOKEN = "questionwork_token";
+const STORAGE_KEY_USER = "questionwork_user";
 
 // ============================================
 // Создание контекста
@@ -66,23 +82,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // Восстанавливаем токен
         const storedToken = localStorage.getItem(STORAGE_KEY_TOKEN);
         const storedUser = localStorage.getItem(STORAGE_KEY_USER);
-        
+
         if (storedToken && storedUser) {
           setToken(storedToken);
-          const parsedUser = JSON.parse(storedUser);
-          
+          let parsedUser;
+          try {
+            parsedUser = JSON.parse(storedUser);
+          } catch {
+            localStorage.removeItem(STORAGE_KEY_TOKEN);
+            localStorage.removeItem(STORAGE_KEY_USER);
+            return;
+          }
+
           // Проверяем актуальность данных пользователя
           try {
             const freshUser = await getUserProfile(parsedUser.id);
             setUser(freshUser);
             localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(freshUser));
-          } catch (error) {
+          } catch (_error) {
             // Если не удалось обновить, используем сохранённые данные
             setUser(parsedUser);
           }
         }
       } catch (error) {
-        console.error('Ошибка инициализации аутентификации:', error);
+        console.error("Ошибка инициализации аутентификации:", error);
         // Очищаем невалидные данные
         localStorage.removeItem(STORAGE_KEY_TOKEN);
         localStorage.removeItem(STORAGE_KEY_USER);
@@ -96,65 +119,85 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   /**
    * Вход в систему
-   * 
+   *
    * @param credentials - Логин и пароль
    * @returns Объект с результатом операции
    */
-  const login = useCallback(async (credentials: LoginData): Promise<{ success: boolean; error?: string }> => {
-    try {
-      const response = await apiLogin(credentials);
-      
-      // Сохраняем токен и пользователя
-      setToken(response.access_token);
-      setUser(response.user);
-      localStorage.setItem(STORAGE_KEY_TOKEN, response.access_token);
-      localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(response.user));
-      
-      return { success: true };
-    } catch (error) {
-      console.error('Ошибка входа:', error);
-      
-      let errorMessage = 'Не удалось войти';
-      if (error instanceof Error) {
-        errorMessage = error.message;
-      } else if (typeof error === 'object' && error !== null && 'detail' in error) {
-        errorMessage = (error as any).detail || errorMessage;
+  const login = useCallback(
+    async (
+      credentials: LoginData,
+    ): Promise<{ success: boolean; error?: string }> => {
+      try {
+        const response = await apiLogin(credentials);
+
+        // Сохраняем токен и пользователя
+        setToken(response.access_token);
+        setUser(response.user);
+        localStorage.setItem(STORAGE_KEY_TOKEN, response.access_token);
+        localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(response.user));
+
+        return { success: true };
+      } catch (error) {
+        console.error("Ошибка входа:", error);
+
+        let errorMessage = "Не удалось войти";
+        if (error instanceof Error) {
+          errorMessage = error.message;
+        } else if (
+          typeof error === "object" &&
+          error !== null &&
+          "detail" in error
+        ) {
+          errorMessage =
+            (error as Record<string, string>).detail || errorMessage;
+        }
+
+        return { success: false, error: errorMessage };
       }
-      
-      return { success: false, error: errorMessage };
-    }
-  }, []);
+    },
+    [],
+  );
 
   /**
    * Регистрация нового пользователя
-   * 
+   *
    * @param data - Данные для регистрации
    * @returns Объект с результатом операции
    */
-  const register = useCallback(async (data: RegisterData): Promise<{ success: boolean; error?: string }> => {
-    try {
-      const response = await apiRegister(data);
-      
-      // Сохраняем токен и пользователя (автоматический вход после регистрации)
-      setToken(response.access_token);
-      setUser(response.user);
-      localStorage.setItem(STORAGE_KEY_TOKEN, response.access_token);
-      localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(response.user));
-      
-      return { success: true };
-    } catch (error) {
-      console.error('Ошибка регистрации:', error);
-      
-      let errorMessage = 'Не удалось зарегистрироваться';
-      if (error instanceof Error) {
-        errorMessage = error.message;
-      } else if (typeof error === 'object' && error !== null && 'detail' in error) {
-        errorMessage = (error as any).detail || errorMessage;
+  const register = useCallback(
+    async (
+      data: RegisterData,
+    ): Promise<{ success: boolean; error?: string }> => {
+      try {
+        const response = await apiRegister(data);
+
+        // Сохраняем токен и пользователя (автоматический вход после регистрации)
+        setToken(response.access_token);
+        setUser(response.user);
+        localStorage.setItem(STORAGE_KEY_TOKEN, response.access_token);
+        localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(response.user));
+
+        return { success: true };
+      } catch (error) {
+        console.error("Ошибка регистрации:", error);
+
+        let errorMessage = "Не удалось зарегистрироваться";
+        if (error instanceof Error) {
+          errorMessage = error.message;
+        } else if (
+          typeof error === "object" &&
+          error !== null &&
+          "detail" in error
+        ) {
+          errorMessage =
+            (error as Record<string, string>).detail || errorMessage;
+        }
+
+        return { success: false, error: errorMessage };
       }
-      
-      return { success: false, error: errorMessage };
-    }
-  }, []);
+    },
+    [],
+  );
 
   /**
    * Выход из системы
@@ -181,13 +224,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
    */
   const refreshUser = useCallback(async () => {
     if (!user?.id) return;
-    
+
     try {
       const freshUser = await getUserProfile(user.id);
       setUser(freshUser);
       localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(freshUser));
     } catch (error) {
-      console.error('Ошибка обновления пользователя:', error);
+      console.error("Ошибка обновления пользователя:", error);
     }
   }, [user?.id]);
 
@@ -207,9 +250,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   return (
-    <AuthContext.Provider value={contextValue}>
-      {children}
-    </AuthContext.Provider>
+    <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>
   );
 }
 
@@ -219,19 +260,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
 /**
  * Хук для доступа к контексту аутентификации
- * 
+ *
  * @returns AuthContextType или undefined если используется вне AuthProvider
- * 
+ *
  * @example
  * const { user, login, logout } = useAuth();
  */
 export function useAuth() {
   const context = useContext(AuthContext);
-  
+
   if (context === undefined) {
-    throw new Error('useAuth должен использоваться внутри AuthProvider');
+    throw new Error("useAuth должен использоваться внутри AuthProvider");
   }
-  
+
   return context;
 }
 

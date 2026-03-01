@@ -1,12 +1,10 @@
 /**
  * Страница входа в систему
- * 
- * Форма аутентификации с валидацией и обработкой ошибок
  */
 
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState, FormEvent, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
@@ -17,41 +15,38 @@ export default function LoginPage() {
   const router = useRouter();
   const { login, isAuthenticated } = useAuth();
   
-  // Состояния формы
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Если уже авторизован — редирект на профиль
+  // Редирект если уже авторизован
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.push("/profile");
+    }
+  }, [isAuthenticated, router]);
+
   if (isAuthenticated) {
-    router.push("/profile");
     return null;
   }
 
-  /**
-   * Обработка отправки формы
-   */
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
 
-    // Простая валидация
     if (!username.trim() || !password.trim()) {
       setError("Заполните все поля");
       setLoading(false);
       return;
     }
 
-    // Попытка входа
     const result = await login({ username: username.trim(), password });
 
     if (result.success) {
-      // Успешный вход — редирект на профиль
       router.push("/profile");
     } else {
-      // Ошибка — показываем сообщение
       setError(result.error || "Не удалось войти");
     }
 
@@ -61,28 +56,22 @@ export default function LoginPage() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900/20 to-gray-900 flex items-center justify-center px-4">
       <Card className="w-full max-w-md p-8">
-        {/* Логотип */}
         <div className="text-center mb-8">
           <Link href="/" className="text-3xl font-bold">
             <span className="text-purple-400">Question</span>
             <span className="text-white">Work</span>
           </Link>
           <h1 className="text-2xl font-bold mt-4">Вход в систему</h1>
-          <p className="text-gray-400 mt-2">
-            Добро пожаловать обратно!
-          </p>
+          <p className="text-gray-400 mt-2">Добро пожаловать обратно!</p>
         </div>
 
-        {/* Сообщение об ошибке */}
         {error && (
           <div className="mb-6 p-4 bg-red-900/30 border border-red-500/50 rounded-lg text-red-200 text-sm">
             ⚠️ {error}
           </div>
         )}
 
-        {/* Форма входа */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Поле username */}
           <div>
             <label htmlFor="username" className="block text-sm font-medium text-gray-300 mb-1">
               Имя пользователя
@@ -99,7 +88,6 @@ export default function LoginPage() {
             />
           </div>
 
-          {/* Поле password */}
           <div>
             <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1">
               Пароль
@@ -116,7 +104,6 @@ export default function LoginPage() {
             />
           </div>
 
-          {/* Кнопка входа */}
           <Button
             type="submit"
             variant="primary"
@@ -137,7 +124,6 @@ export default function LoginPage() {
           </Button>
         </form>
 
-        {/* Ссылка на регистрацию */}
         <div className="mt-6 text-center text-sm text-gray-400">
           Нет аккаунта?{" "}
           <Link href="/auth/register" className="text-purple-400 hover:text-purple-300 font-medium">
@@ -145,14 +131,15 @@ export default function LoginPage() {
           </Link>
         </div>
 
-        {/* Демо-данные для тестирования */}
-        <div className="mt-6 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
-          <p className="text-xs text-gray-500 mb-2">📝 Тестовые учётные данные:</p>
-          <div className="text-xs text-gray-400 space-y-1 font-mono">
-            <div>Username: <span className="text-purple-300">novice_dev</span></div>
-            <div>Password: <span className="text-purple-300">password123</span></div>
+        {process.env.NODE_ENV === "development" && (
+          <div className="mt-6 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+            <p className="text-xs text-gray-500 mb-2">📝 Тестовые учётные данные:</p>
+            <div className="text-xs text-gray-400 space-y-1 font-mono">
+              <div>Username: <span className="text-purple-300">novice_dev</span></div>
+              <div>Password: <span className="text-purple-300">password123</span></div>
+            </div>
           </div>
-        </div>
+        )}
       </Card>
     </main>
   );

@@ -1,12 +1,13 @@
 /**
  * QuestionWork API Client
  * Клиент для взаимодействия с FastAPI backend
- * 
+ *
  * Поддерживает автоматическую подстановку Bearer токена
  */
 
 // Базовый URL API (можно вынести в .env.local)
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
 // ============================================
 // TypeScript интерфейсы для API ответов
@@ -16,9 +17,9 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/a
  * Характеристики пользователя (RPG статы)
  */
 export interface UserStats {
-  int: number;      // Интеллект
-  dex: number;      // Ловкость
-  cha: number;      // Харизма
+  int: number;
+  dex: number;
+  cha: number;
 }
 
 /**
@@ -29,13 +30,75 @@ export interface UserBadge {
   name: string;
   description: string;
   icon: string;
-  earned_at: string;  // ISO 8601 дата
+  earned_at: string;
 }
 
 /**
  * Грейд пользователя (RPG система)
  */
-export type UserGrade = 'novice' | 'junior' | 'middle' | 'senior';
+export type UserGrade = "novice" | "junior" | "middle" | "senior";
+
+/**
+ * Статус квеста
+ */
+export type QuestStatus = "open" | "in_progress" | "completed" | "cancelled";
+
+/**
+ * Квест (заказ) на бирже
+ */
+export interface Quest {
+  id: string;
+  client_id: string;
+  client_username?: string;
+  title: string;
+  description: string;
+  required_grade: UserGrade;
+  skills: string[];
+  budget: number;
+  currency: string;
+  xp_reward: number;
+  status: QuestStatus;
+  applications: string[];
+  assigned_to: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+}
+
+/**
+ * Данные для создания квеста
+ */
+export interface QuestCreate {
+  title: string;
+  description: string;
+  required_grade?: UserGrade;
+  skills?: string[];
+  budget: number;
+  currency?: string;
+  xp_reward?: number;
+}
+
+/**
+ * Отклик на квест
+ */
+export interface QuestApplication {
+  id: string;
+  quest_id: string;
+  freelancer_id: string;
+  freelancer_username: string;
+  freelancer_grade: UserGrade;
+  cover_letter?: string;
+  proposed_price?: number;
+  created_at: string;
+}
+
+/**
+ * Данные для создания отклика
+ */
+export interface QuestApplicationCreate {
+  cover_letter?: string;
+  proposed_price?: number;
+}
 
 /**
  * Профиль пользователя (полный ответ от API)
@@ -44,6 +107,7 @@ export interface UserProfile {
   id: string;
   username: string;
   email: string | null;
+  role: "client" | "freelancer";
   level: number;
   grade: UserGrade;
   xp: number;
@@ -52,8 +116,8 @@ export interface UserProfile {
   badges: UserBadge[];
   bio: string | null;
   skills: string[];
-  created_at: string;  // ISO 8601 дата
-  updated_at: string;  // ISO 8601 дата
+  created_at: string;
+  updated_at: string;
 }
 
 /**
@@ -72,6 +136,7 @@ export interface RegisterData {
   username: string;
   email: string;
   password: string;
+  role: "client" | "freelancer";
 }
 
 /**
@@ -91,251 +156,335 @@ export interface ApiError {
   detail?: string;
 }
 
+/**
+ * Ответ со списком квестов (пагинация)
+ */
+export interface QuestListResponse {
+  quests: Quest[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_more: boolean;
+}
+
 // ============================================
 // Вспомогательные функции
 // ============================================
 
 /**
  * Получить токен из localStorage
- * Используется для автоматической подстановки в заголовки
  */
 export function getAuthToken(): string | null {
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return null;
   }
-  return localStorage.getItem('questionwork_token');
+  return localStorage.getItem("questionwork_token");
 }
 
 /**
- * Обработка ошибок API
- */
-function handleApiError(error: unknown): ApiError {
-  if (error instanceof Response) {
-    // HTTP ошибка от сервера
-    return {
-      status: error.status,
-      message: `HTTP ${error.status}`,
-      detail: error.statusText,
-    };
-  }
-  
-  if (error instanceof Error) {
-    // Сетевая ошибка или другая ошибка
-    return {
-      status: 0,
-      message: 'Network Error',
-      detail: error.message,
-    };
-  }
-  
-  // Неизвестная ошибка
-  return {
-    status: 0,
-    message: 'Unknown Error',
-    detail: String(error),
-  };
-}
-
-/**
- * Выполнение fetch запроса с обработкой ошибок и автоматической подстановкой токена
- * 
- * @param endpoint - URL endpoint относительно API_BASE_URL
- * @param options - Опции fetch
- * @param requireAuth - Требуется ли авторизация (добавляет Bearer токен)
+ * Выполнение fetch запроса с обработкой ошибок и токеном
  */
 async function fetchApi<T>(
   endpoint: string,
   options?: RequestInit,
-  requireAuth: boolean = false
+  requireAuth: boolean = false,
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
-  
-  // Получаем токен если требуется авторизация
+
   const token = requireAuth ? getAuthToken() : null;
-  
+
   const defaultOptions: RequestInit = {
     headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   };
-  
+
   const config = { ...defaultOptions, ...options };
-  
-  // Merge headers properly
+
   if (options?.headers) {
     config.headers = {
       ...defaultOptions.headers,
       ...options.headers,
     };
   }
-  
+
   try {
-    const response = await fetch(url, config);
-    
-    // Обработка 401 Unauthorized (токен невалиден)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const response = await fetch(url, { ...config, signal: controller.signal });
+    clearTimeout(timeoutId);
+
     if (response.status === 401) {
-      // Очищаем невалидный токен
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('questionwork_token');
-        localStorage.removeItem('questionwork_user');
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("questionwork_token");
+        localStorage.removeItem("questionwork_user");
       }
-      
-      throw new Response('Unauthorized: Token invalid or expired', {
+
+      throw new Response("Unauthorized: Token invalid or expired", {
         status: 401,
-        statusText: 'Unauthorized',
+        statusText: "Unauthorized",
       });
     }
-    
+
     if (!response.ok) {
-      // Пытаемся получить детальную ошибку от сервера
       let errorDetail = response.statusText;
       try {
         const errorData = await response.json();
-        errorDetail = errorData.detail || errorData.message || response.statusText;
+        errorDetail =
+          errorData.detail || errorData.message || response.statusText;
       } catch {
-        // Не удалось распарсить JSON ошибки
+        // Не удалось распарсить
       }
-      
+
       throw new Response(`API Error: ${errorDetail}`, {
         status: response.status,
         statusText: errorDetail,
       });
     }
-    
-    // Если ответ пустой (204 No Content)
+
     if (response.status === 204) {
       return {} as T;
     }
-    
+
     return await response.json();
   } catch (error) {
-    // Пробрасываем ошибку дальше
     throw error;
   }
 }
 
 // ============================================
-// API функции
+// User API функции
 // ============================================
 
-/**
- * Получить профиль пользователя по ID
- * 
- * @param userId - Уникальный ID пользователя
- * @returns Профиль пользователя
- */
 export async function getUserProfile(userId: string): Promise<UserProfile> {
   return fetchApi<UserProfile>(`/users/${userId}`);
 }
 
-/**
- * Получить только характеристики пользователя
- * 
- * @param userId - Уникальный ID пользователя
- * @returns Объект со статами (INT, DEX, CHA)
- */
 export async function getUserStats(userId: string): Promise<UserStats> {
   return fetchApi<UserStats>(`/users/${userId}/stats`);
 }
 
-/**
- * Получить список всех пользователей
- * 
- * @param skip - Пропустить N пользователей (пагинация)
- * @param limit - Максимальное количество результатов
- * @param grade - Фильтр по грейду (опционально)
- * @returns Массив профилей пользователей
- */
 export async function getAllUsers(
   skip: number = 0,
   limit: number = 10,
-  grade?: UserGrade
+  grade?: UserGrade,
 ): Promise<UserProfile[]> {
   const params = new URLSearchParams({
     skip: skip.toString(),
     limit: limit.toString(),
   });
-  
+
   if (grade) {
-    params.append('grade', grade);
+    params.append("grade", grade);
   }
-  
+
   return fetchApi<UserProfile[]>(`/users?${params.toString()}`);
 }
 
-/**
- * Зарегистрировать нового пользователя
- * 
- * @param data - Данные для регистрации
- * @returns Токен и профиль пользователя
- */
 export async function register(data: RegisterData): Promise<TokenResponse> {
-  // Не требуем auth для регистрации
-  return fetchApi<TokenResponse>('/auth/register', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }, false);
+  return fetchApi<TokenResponse>(
+    "/auth/register",
+    {
+      method: "POST",
+      body: JSON.stringify(data),
+    },
+    false,
+  );
 }
 
-/**
- * Войти в систему
- * 
- * @param credentials - Логин и пароль
- * @returns Токен и профиль пользователя
- */
 export async function login(credentials: LoginData): Promise<TokenResponse> {
-  // Не требуем auth для логина
-  return fetchApi<TokenResponse>('/auth/login', {
-    method: 'POST',
-    body: JSON.stringify(credentials),
-  }, false);
+  return fetchApi<TokenResponse>(
+    "/auth/login",
+    {
+      method: "POST",
+      body: JSON.stringify(credentials),
+    },
+    false,
+  );
 }
 
-/**
- * Выйти из системы
- * 
- * @returns Сообщение об успехе
- */
 export async function logout(): Promise<{ message: string }> {
-  // Требуем auth для logout
-  return fetchApi<{ message: string }>('/auth/logout', {
-    method: 'POST',
-  }, true);
+  return fetchApi<{ message: string }>(
+    "/auth/logout",
+    {
+      method: "POST",
+    },
+    true,
+  );
 }
 
-/**
- * Проверить работоспособность API
- * 
- * @returns Статус API
- */
-export async function checkHealth(): Promise<{ status: string; message: string }> {
-  // Health endpoint находится вне /api/v1
-  const response = await fetch('http://localhost:8000/health');
+export async function checkHealth(): Promise<{
+  status: string;
+  message: string;
+}> {
+  const baseUrl = API_BASE_URL.replace("/api/v1", "");
+  const response = await fetch(`${baseUrl}/health`);
   return await response.json();
 }
 
+// ============================================
+// Quest API функции
+// ============================================
+
 /**
- * Получить текущий профиль авторизованного пользователя
- * 
- * @returns Профиль текущего пользователя
+ * Получить список квестов с фильтрацией
  */
-export async function getCurrentUser(): Promise<UserProfile> {
-  const token = getAuthToken();
-  if (!token) {
-    throw new Error('Not authenticated');
+export async function getQuests(
+  page: number = 1,
+  pageSize: number = 10,
+  filters?: {
+    status?: QuestStatus;
+    grade?: UserGrade;
+    skill?: string;
+    minBudget?: number;
+    maxBudget?: number;
+  },
+): Promise<QuestListResponse> {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    page_size: pageSize.toString(),
+  });
+
+  if (filters) {
+    if (filters.status) params.append("status_filter", filters.status);
+    if (filters.grade) params.append("grade_filter", filters.grade);
+    if (filters.skill) params.append("skill_filter", filters.skill);
+    if (filters.minBudget !== undefined)
+      params.append("min_budget", filters.minBudget.toString());
+    if (filters.maxBudget !== undefined)
+      params.append("max_budget", filters.maxBudget.toString());
   }
-  
-  // Для получения текущего пользователя нужен отдельный endpoint
-  // Пока используем заглушку - в будущем будет /users/me
-  throw new Error('Endpoint /users/me not implemented yet');
+
+  return fetchApi<QuestListResponse>(`/quests?${params.toString()}`);
+}
+
+/**
+ * Получить детали квеста по ID
+ */
+export async function getQuest(questId: string): Promise<Quest> {
+  return fetchApi<Quest>(`/quests/${questId}`);
+}
+
+/**
+ * Создать новый квест
+ */
+export async function createQuest(questData: QuestCreate): Promise<Quest> {
+  return fetchApi<Quest>(
+    "/quests/",
+    {
+      method: "POST",
+      body: JSON.stringify(questData),
+    },
+    true,
+  );
+}
+
+/**
+ * Откликнуться на квест
+ */
+export async function applyToQuest(
+  questId: string,
+  applicationData: QuestApplicationCreate,
+): Promise<{ message: string; application: QuestApplication }> {
+  return fetchApi<{ message: string; application: QuestApplication }>(
+    `/quests/${questId}/apply`,
+    {
+      method: "POST",
+      body: JSON.stringify(applicationData),
+    },
+    true,
+  );
+}
+
+/**
+ * Назначить исполнителя на квест
+ */
+export async function assignQuest(
+  questId: string,
+  freelancerId: string,
+): Promise<{ message: string; quest: Quest }> {
+  return fetchApi<{ message: string; quest: Quest }>(
+    `/quests/${questId}/assign?freelancer_id=${freelancerId}`,
+    {
+      method: "POST",
+    },
+    true,
+  );
+}
+
+/**
+ * Завершить квест (исполнитель)
+ */
+export async function completeQuest(
+  questId: string,
+): Promise<{ message: string; quest: Quest; xp_earned: number }> {
+  return fetchApi<{ message: string; quest: Quest; xp_earned: number }>(
+    `/quests/${questId}/complete`,
+    {
+      method: "POST",
+    },
+    true,
+  );
+}
+
+/**
+ * Подтвердить завершение квеста (клиент)
+ */
+export async function confirmQuest(questId: string): Promise<{
+  message: string;
+  quest: Quest;
+  xp_reward: number;
+  money_reward: number;
+}> {
+  return fetchApi<{
+    message: string;
+    quest: Quest;
+    xp_reward: number;
+    money_reward: number;
+  }>(
+    `/quests/${questId}/confirm`,
+    {
+      method: "POST",
+    },
+    true,
+  );
+}
+
+/**
+ * Отменить квест (клиент)
+ */
+export async function cancelQuest(
+  questId: string,
+): Promise<{ message: string; quest: Quest }> {
+  return fetchApi<{ message: string; quest: Quest }>(
+    `/quests/${questId}/cancel`,
+    {
+      method: "POST",
+    },
+    true,
+  );
+}
+
+/**
+ * Получить отклики на квест
+ */
+export async function getQuestApplications(
+  questId: string,
+): Promise<{ applications: QuestApplication[]; total: number }> {
+  return fetchApi<{ applications: QuestApplication[]; total: number }>(
+    `/quests/${questId}/applications`,
+    {},
+    true,
+  );
 }
 
 // ============================================
-// Экспорт для удобства
+// Экспорт по умолчанию
 // ============================================
 
-export default {
+const api = {
+  // User
   getUserProfile,
   getUserStats,
   getAllUsers,
@@ -343,6 +492,17 @@ export default {
   login,
   logout,
   checkHealth,
-  getCurrentUser,
+  // Quest
+  getQuests,
+  getQuest,
+  createQuest,
+  applyToQuest,
+  assignQuest,
+  completeQuest,
+  confirmQuest,
+  cancelQuest,
+  getQuestApplications,
   getAuthToken,
 };
+
+export default api;

@@ -1,9 +1,3 @@
-/**
- * Страница регистрации нового пользователя
- * 
- * Форма с валидацией пароля и проверкой совпадения
- */
-
 "use client";
 
 import { useState, FormEvent } from "react";
@@ -13,95 +7,50 @@ import { useAuth } from "@/context/AuthContext";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 
+type UserRole = "client" | "freelancer";
+
 export default function RegisterPage() {
   const router = useRouter();
   const { register, isAuthenticated } = useAuth();
   
-  // Состояния формы
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [role, setRole] = useState<UserRole>("freelancer");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Если уже авторизован — редирект на профиль
   if (isAuthenticated) {
     router.push("/profile");
     return null;
   }
 
-  /**
-   * Валидация username
-   * Разрешены: буквы, цифры, подчёркивания, дефисы
-   * Длина: 3-50 символов
-   */
-  const validateUsername = (name: string): string | null => {
-    if (name.length < 3) {
-      return "Имя пользователя должно содержать минимум 3 символа";
-    }
-    if (name.length > 50) {
-      return "Имя пользователя должно содержать максимум 50 символов";
-    }
-    // Разрешаем буквы (латиница), цифры, подчёркивания и дефисы
-    const validPattern = /^[a-zA-Z0-9_-]+$/;
-    if (!validPattern.test(name)) {
-      return "Имя может содержать только буквы, цифры, подчёркивания (_) и дефисы (-)";
-    }
-    return null;
-  };
-
-  /**
-   * Валидация пароля
-   */
-  const validatePassword = (pwd: string): string | null => {
-    if (pwd.length < 8) {
-      return "Пароль должен содержать минимум 8 символов";
-    }
-    if (!/[a-zA-Z]/.test(pwd)) {
-      return "Пароль должен содержать хотя бы одну букву";
-    }
-    if (!/[0-9]/.test(pwd)) {
-      return "Пароль должен содержать хотя бы одну цифру";
-    }
-    return null;
-  };
-
-  /**
-   * Обработка отправки формы
-   */
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    // Валидация всех полей
     if (!username.trim() || !email.trim() || !password.trim()) {
-      setError("Заполните все обязательные поля");
+      setError("Заполните все поля");
       return;
     }
 
-    // Валидация email (простая)
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      setError("Введите корректный email адрес");
+      setError("Некорректный email");
       return;
     }
 
-    // Валидация username
-    const usernameError = validateUsername(username.trim());
-    if (usernameError) {
-      setError(usernameError);
+    if (username.trim().length < 3) {
+      setError("Имя должно содержать минимум 3 символа");
       return;
     }
 
-    // Валидация пароля
-    const passwordError = validatePassword(password);
-    if (passwordError) {
-      setError(passwordError);
+    if (password.length < 8) {
+      setError("Пароль должен содержать минимум 8 символов");
       return;
     }
 
-    // Проверка совпадения паролей
     if (password !== confirmPassword) {
       setError("Пароли не совпадают");
       return;
@@ -110,26 +59,21 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      // Попытка регистрации
       const result = await register({
         username: username.trim(),
         email: email.trim(),
         password,
+        role,
       });
 
       if (result.success) {
-        // Успешная регистрация — редирект на профиль
-        // Даём время на сохранение токена
-        setTimeout(() => {
-          router.push("/profile");
-        }, 100);
+        setTimeout(() => router.push("/profile"), 100);
       } else {
-        // Ошибка — показываем сообщение
-        setError(result.error || "Не удалось зарегистрироваться");
+        setError(result.error || "Ошибка регистрации");
       }
     } catch (err) {
       console.error("Registration error:", err);
-      setError("Произошла ошибка при регистрации");
+      setError("Произошла ошибка");
     } finally {
       setLoading(false);
     }
@@ -138,28 +82,22 @@ export default function RegisterPage() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900/20 to-gray-900 flex items-center justify-center px-4 py-8">
       <Card className="w-full max-w-md p-8">
-        {/* Логотип */}
         <div className="text-center mb-8">
           <Link href="/" className="text-3xl font-bold">
             <span className="text-purple-400">Question</span>
             <span className="text-white">Work</span>
           </Link>
           <h1 className="text-2xl font-bold mt-4">Создать аккаунт</h1>
-          <p className="text-gray-400 mt-2">
-            Начните свой путь в IT-фрилансе
-          </p>
+          <p className="text-gray-400 mt-2">Начните свой путь в IT-фрилансе</p>
         </div>
 
-        {/* Сообщение об ошибке */}
         {error && (
           <div className="mb-6 p-4 bg-red-900/30 border border-red-500/50 rounded-lg text-red-200 text-sm">
             ⚠️ {error}
           </div>
         )}
 
-        {/* Форма регистрации */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Поле username */}
           <div>
             <label htmlFor="username" className="block text-sm font-medium text-gray-300 mb-1">
               Имя пользователя *
@@ -169,21 +107,13 @@ export default function RegisterPage() {
               id="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white placeholder-gray-500"
+              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white"
               placeholder="novice_dev"
-              autoComplete="username"
               disabled={loading}
-              minLength={3}
-              maxLength={50}
-              pattern="[a-zA-Z0-9_-]+"
               required
             />
-            <p className="text-xs text-gray-500 mt-1">
-              Разрешены: буквы, цифры, _ и -
-            </p>
           </div>
 
-          {/* Поле email */}
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1">
               Email *
@@ -193,15 +123,13 @@ export default function RegisterPage() {
               id="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white placeholder-gray-500"
+              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white"
               placeholder="you@example.com"
-              autoComplete="email"
               disabled={loading}
               required
             />
           </div>
 
-          {/* Поле password */}
           <div>
             <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1">
               Пароль *
@@ -211,18 +139,13 @@ export default function RegisterPage() {
               id="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white placeholder-gray-500"
+              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white"
               placeholder="••••••••"
-              autoComplete="new-password"
               disabled={loading}
               required
             />
-            <p className="text-xs text-gray-500 mt-1">
-              Минимум 8 символов, буквы и цифры
-            </p>
           </div>
 
-          {/* Поле confirmPassword */}
           <div>
             <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-300 mb-1">
               Подтвердите пароль *
@@ -232,50 +155,55 @@ export default function RegisterPage() {
               id="confirmPassword"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white placeholder-gray-500"
+              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white"
               placeholder="••••••••"
-              autoComplete="new-password"
               disabled={loading}
               required
             />
           </div>
 
-          {/* Кнопка регистрации */}
-          <Button
-            type="submit"
-            variant="primary"
-            className="w-full"
-            disabled={loading}
-          >
-            {loading ? (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                Регистрация...
-              </span>
-            ) : (
-              "🚀 Создать аккаунт"
-            )}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">Тип аккаунта *</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setRole("freelancer")}
+                className={`p-3 rounded-lg border-2 transition-all ${
+                  role === "freelancer"
+                    ? "border-purple-500 bg-purple-500/20"
+                    : "border-gray-700 bg-gray-800"
+                }`}
+              >
+                <div className="text-2xl mb-1">👨‍💻</div>
+                <div className="font-medium text-sm">Фрилансер</div>
+                <div className="text-xs text-gray-400 mt-1">Выполнять квесты</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRole("client")}
+                className={`p-3 rounded-lg border-2 transition-all ${
+                  role === "client"
+                    ? "border-purple-500 bg-purple-500/20"
+                    : "border-gray-700 bg-gray-800"
+                }`}
+              >
+                <div className="text-2xl mb-1">💼</div>
+                <div className="font-medium text-sm">Клиент</div>
+                <div className="text-xs text-gray-400 mt-1">Создавать квесты</div>
+              </button>
+            </div>
+          </div>
+
+          <Button type="submit" variant="primary" className="w-full" disabled={loading}>
+            {loading ? "Регистрация..." : "🚀 Создать аккаунт"}
           </Button>
         </form>
 
-        {/* Ссылка на вход */}
         <div className="mt-6 text-center text-sm text-gray-400">
           Уже есть аккаунт?{" "}
           <Link href="/auth/login" className="text-purple-400 hover:text-purple-300 font-medium">
             Войти
           </Link>
-        </div>
-
-        {/* Требования */}
-        <div className="mt-6 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
-          <p className="text-xs text-gray-500 mb-2">🔒 Требования:</p>
-          <ul className="text-xs text-gray-400 space-y-1">
-            <li>• Имя: 3-50 символов (буквы, цифры, _, -)</li>
-            <li>• Пароль: мин. 8 символов, буквы и цифры</li>
-          </ul>
         </div>
       </Card>
     </main>

@@ -3,8 +3,11 @@ import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 
 export const metadata: Metadata = {
-  title: "QuestionWork - IT Freelance Marketplace",
-  description: "Биржа фриланса с RPG-геймификацией для IT-специалистов",
+  title: "QuestionWork - IT Freelance RPG",
+  description: "Биржа фриланса с геймификацией для IT-специалистов",
+  icons: {
+    icon: '/favicon.svg',
+  },
 };
 
 export default function RootLayout({

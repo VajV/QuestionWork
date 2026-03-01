@@ -110,6 +110,17 @@ export default function ProfilePage() {
                 <h2 className="text-2xl font-bold mb-2">{profile.username}</h2>
                 <p className="text-gray-400 mb-4">{profile.email}</p>
                 
+                {/* Роль */}
+                <div className="mb-4">
+                  <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
+                    profile.role === 'client'
+                      ? 'bg-blue-500/20 text-blue-300 border border-blue-500/50'
+                      : 'bg-green-500/20 text-green-300 border border-green-500/50'
+                  }`}>
+                    {profile.role === 'client' ? '💼 Клиент' : '👨‍💻 Фрилансер'}
+                  </span>
+                </div>
+                
                 {/* XP Bar */}
                 <div className="mb-4">
                   <div className="flex justify-between text-sm mb-1">
