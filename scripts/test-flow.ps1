@@ -135,7 +135,7 @@ Write-Host "   QuestionWork -- Full E2E Flow Test"          -ForegroundColor Mag
 Write-Host "   $(Get-Date -Format 'yyyy-MM-dd  HH:mm:ss')"  -ForegroundColor Magenta
 Write-Host "  =============================================" -ForegroundColor Magenta
 
-Write-Header "PRE-FLIGHT: Checking backend availability"
+Write-Header "PRE-FLIGHT: Checking backend and PostgreSQL availability"
 
 Write-Step "Connecting to http://localhost:8000/health ..."
 
@@ -160,6 +160,37 @@ if (-not $healthOk) {
 }
 
 Write-Pass "Backend health check" "http://localhost:8000/health => 200 OK"
+
+Write-Step "Checking PostgreSQL TCP port 5432 ..."
+$dbPortOk = $false
+try {
+    $dbConn = Test-NetConnection -ComputerName "127.0.0.1" -Port 5432 -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
+    $dbPortOk = ($dbConn.TcpTestSucceeded -eq $true)
+} catch {
+    $dbPortOk = $false
+}
+
+if ($dbPortOk) {
+    Write-Pass "PostgreSQL port check" "127.0.0.1:5432 is reachable"
+} else {
+    Write-Fail "PostgreSQL port check" "127.0.0.1:5432 is NOT reachable"
+    Write-Host "  [ABORT] Database is not available. Start DB first:" -ForegroundColor Red
+    Write-Host "          .\scripts\start-db.ps1" -ForegroundColor Yellow
+    Write-Host "          .\scripts\migrate.ps1"  -ForegroundColor Yellow
+    Write-Host ""
+    exit 1
+}
+
+Write-Step "Checking DB-read endpoint /api/v1/users/ ..."
+$dbApiCheck = Invoke-Api -Method GET -Endpoint "/users/?limit=1"
+if ($dbApiCheck.Ok -and $dbApiCheck.StatusCode -eq 200) {
+    Write-Pass "DB API readiness check" "GET /users/ works (DB queries are operational)"
+} else {
+    Write-Fail "DB API readiness check" "HTTP $($dbApiCheck.StatusCode) -- $($dbApiCheck.Raw)"
+    Write-Host "  [ABORT] Backend is up, but DB-backed endpoints are not ready." -ForegroundColor Red
+    Write-Host ""
+    exit 1
+}
 
 # ---------------------------------------------------------------------------
 # Generate unique test IDs (timestamp-based)
@@ -657,11 +688,21 @@ if ($clientToken) {
 
         if ($cancelResp.Ok -and $cancelResp.StatusCode -eq 200) {
             Write-Pass "Quest cancelled by client"
-            $cs = $cancelResp.Data.quest.status
-            if ($cs -eq "cancelled") {
-                Write-Pass "Quest status = cancelled"
+
+            # Новый API может вернуть только message без quest payload.
+            # Поэтому валидацию статуса делаем через повторный GET /quests/{id}.
+            Write-Step "GET /quests/$cancelQuestId -- verify cancelled status in DB-backed response"
+            $cancelStateResp = Invoke-Api -Method GET -Endpoint "/quests/$cancelQuestId"
+
+            if ($cancelStateResp.Ok -and $cancelStateResp.StatusCode -eq 200) {
+                $cs = $cancelStateResp.Data.status
+                if ($cs -eq "cancelled") {
+                    Write-Pass "Quest status = cancelled"
+                } else {
+                    Write-Fail "Quest status should be cancelled" "got $cs"
+                }
             } else {
-                Write-Fail "Quest status should be cancelled" "got $cs"
+                Write-Fail "Fetch cancelled quest state" "HTTP $($cancelStateResp.StatusCode) -- $($cancelStateResp.Raw)"
             }
         } else {
             Write-Fail "Cancel quest" "HTTP $($cancelResp.StatusCode) -- $($cancelResp.Raw)"
@@ -776,6 +817,7 @@ Write-Host "    Freelancer : $freelancerUser  /  $freelancerPass" -ForegroundCol
 Write-Host ""
 Write-Host "  Quick links:" -ForegroundColor Gray
 Write-Host "    Frontend  : http://localhost:3000"       -ForegroundColor DarkGray
-Write-Host "    Swagger   : http://localhost:8000/docs"  -ForegroundColor DarkGray
+Write-Host "    Swagger   : http://localhost:8000/docs"   -ForegroundColor DarkGray
 Write-Host "    Health    : http://localhost:8000/health" -ForegroundColor DarkGray
+Write-Host "    DB check  : .\scripts\test-db.ps1"        -ForegroundColor DarkGray
 Write-Host ""

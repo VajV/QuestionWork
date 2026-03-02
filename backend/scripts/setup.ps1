@@ -818,6 +818,43 @@ Write-Host "`n[6/6] Создание виртуального окружения
 
 Set-Location $BACKEND_ROOT
 
+# ============================================
+# Start Docker Compose and wait for DB
+# ============================================
+Write-Host "`n[5.5/6] Запуск docker-compose.dev.yml (Postgres + Redis)..." -ForegroundColor Yellow
+
+# Определяем корень репозитория (на уровень выше backend)
+$REPO_ROOT = Split-Path -Parent $BACKEND_ROOT
+$composeFile = Join-Path $REPO_ROOT "docker-compose.dev.yml"
+
+if (-not (Test-Path $composeFile)) {
+    Write-Host "  Файл docker-compose.dev.yml не найден в корне репозитория: $composeFile" -ForegroundColor Yellow
+} else {
+    Write-Host "  Запускаю Docker Compose: $composeFile" -ForegroundColor Green
+    docker compose -f $composeFile up -d
+
+    # Ждём готовности Postgres внутри контейнера
+    $maxAttempts = 60
+    $attempt = 0
+    Write-Host "  Ожидание готовности Postgres (подождём до $maxAttempts попыток)..." -ForegroundColor Yellow
+    while ($attempt -lt $maxAttempts) {
+        # Выполняем pg_isready внутри контейнера; используем exit code для проверки
+        docker compose -f $composeFile exec -T questionwork_postgres pg_isready -U postgres > $null 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  Postgres отвечает и готов к подключению." -ForegroundColor Green
+            break
+        }
+        Start-Sleep -Seconds 2
+        $attempt++
+        Write-Host "    Попытка $attempt/$maxAttempts..." -ForegroundColor DarkYellow
+    }
+
+    if ($attempt -ge $maxAttempts) {
+        Write-Host "Ошибка: Postgres не стал доступен за отведённое время." -ForegroundColor Red
+        Write-Host "Проверьте логи контейнера: docker compose -f $composeFile logs questionwork_postgres" -ForegroundColor Red
+    }
+}
+
 # Создаём venv
 if (Test-Path ".venv") {
     Write-Host "  Виртуальное окружение уже существует" -ForegroundColor Green
@@ -830,6 +867,27 @@ if (Test-Path ".venv") {
 Write-Host "  Активация и установка зависимостей..." -ForegroundColor Yellow
 & ".\.venv\Scripts\Activate.ps1"
 pip install -r requirements.txt
+
+# Устанавливаем alembic (если ещё не установлен) и применяем миграции
+Write-Host "  Установка alembic и применение миграций..." -ForegroundColor Yellow
+pip install alembic
+
+# Активируем виртуальное окружение и запускаем alembic
+& ".\.venv\Scripts\Activate.ps1"
+try {
+    Write-Host "  Применяю миграции Alembic (upgrade head)..." -ForegroundColor Yellow
+    alembic -c alembic.ini upgrade head
+    Write-Host "  Миграции применены." -ForegroundColor Green
+} catch {
+    Write-Host "  Не удалось применить миграции автоматически: $_" -ForegroundColor Red
+    Write-Host "  Выполните вручную: alembic -c alembic.ini upgrade head" -ForegroundColor Yellow
+}
+
+# Показать состояние Docker Compose сервисов, если файлик существует
+if (Test-Path $composeFile) {
+    Write-Host "`nСостояние Docker сервисов:" -ForegroundColor Cyan
+    docker compose -f $composeFile ps
+}
 
 Write-Host "`n✅ Настройка завершена!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan

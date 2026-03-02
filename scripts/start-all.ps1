@@ -26,6 +26,24 @@ if (-not (Test-Path $FRONTEND_DIR)) {
 }
 
 
+# ── Start Database ───────────────────────────────────────────────────────────
+
+$START_DB = Join-Path $PSScriptRoot "start-db.ps1"
+if (Test-Path $START_DB) {
+    & $START_DB
+} else {
+    Write-Host "[WARN] start-db.ps1 not found." -ForegroundColor Yellow
+}
+
+# ── Run Migrations ───────────────────────────────────────────────────────────
+
+$MIGRATE = Join-Path $PSScriptRoot "migrate.ps1"
+if (Test-Path $MIGRATE) {
+    & $MIGRATE
+} else {
+    Write-Host "[WARN] migrate.ps1 not found." -ForegroundColor Yellow
+}
+
 # ── Check venv ───────────────────────────────────────────────────────────────
 
 $VENV_ACTIVATE = Join-Path $BACKEND_DIR ".venv\Scripts\activate.ps1"

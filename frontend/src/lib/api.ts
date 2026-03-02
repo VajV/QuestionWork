@@ -9,6 +9,19 @@
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
+// In-memory access token (do not persist access tokens in localStorage)
+let ACCESS_TOKEN: string | null = null;
+
+/** Set current access token in memory. Called by AuthContext after login/refresh. */
+export function setAccessToken(token: string | null) {
+  ACCESS_TOKEN = token;
+}
+
+/** Get current access token from memory. */
+export function getAccessToken(): string | null {
+  return ACCESS_TOKEN;
+}
+
 // ============================================
 // TypeScript интерфейсы для API ответов
 // ============================================
@@ -174,11 +187,9 @@ export interface QuestListResponse {
 /**
  * Получить токен из localStorage
  */
+// Deprecated: token is now kept in-memory. Use `getAccessToken()`.
 export function getAuthToken(): string | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  return localStorage.getItem("questionwork_token");
+  return getAccessToken();
 }
 
 /**
@@ -191,7 +202,7 @@ async function fetchApi<T>(
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
 
-  const token = requireAuth ? getAuthToken() : null;
+  const token = requireAuth ? getAccessToken() : null;
 
   const defaultOptions: RequestInit = {
     headers: {
@@ -212,12 +223,44 @@ async function fetchApi<T>(
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
-    const response = await fetch(url, { ...config, signal: controller.signal });
+    // Include credentials so httpOnly refresh cookie is sent on same-site flows
+    const response = await fetch(url, { ...config, signal: controller.signal, credentials: "include" });
     clearTimeout(timeoutId);
 
+    // If unauthorized, attempt to refresh using httpOnly refresh cookie.
     if (response.status === 401) {
+      // Try refresh endpoint once
+      try {
+        const refreshResp = await fetch(`${API_BASE_URL}/auth/refresh`, {
+          method: "POST",
+          credentials: "include",
+        });
+
+        if (refreshResp.ok) {
+          const refreshed = await refreshResp.json();
+          // server returns TokenResponse with access_token and user
+          setAccessToken(refreshed.access_token);
+          // retry original request once with new token
+          const retryHeaders = { ...(config.headers as Record<string, string>), Authorization: `Bearer ${refreshed.access_token}` };
+          const retryResp = await fetch(url, { ...config, headers: retryHeaders, credentials: "include" });
+          if (!retryResp.ok) {
+            let err = retryResp.statusText;
+            try {
+              const errorData = await retryResp.json();
+              err = errorData.detail || errorData.message || err;
+            } catch {}
+            throw new Response(`API Error: ${err}`, { status: retryResp.status, statusText: err });
+          }
+          if (retryResp.status === 204) return {} as T;
+          return await retryResp.json();
+        }
+      } catch (err) {
+        // fallthrough to clean-up below
+      }
+
+      // If refresh failed, clear in-memory token and stored user and surface 401
+      setAccessToken(null);
       if (typeof window !== "undefined") {
-        localStorage.removeItem("questionwork_token");
         localStorage.removeItem("questionwork_user");
       }
 
@@ -294,7 +337,7 @@ export async function register(data: RegisterData): Promise<TokenResponse> {
 }
 
 export async function login(credentials: LoginData): Promise<TokenResponse> {
-  return fetchApi<TokenResponse>(
+  const resp = await fetchApi<TokenResponse>(
     "/auth/login",
     {
       method: "POST",
@@ -302,16 +345,34 @@ export async function login(credentials: LoginData): Promise<TokenResponse> {
     },
     false,
   );
+  // store access token in memory only; cookie holds refresh token (httpOnly)
+  setAccessToken(resp.access_token);
+  return resp;
 }
 
 export async function logout(): Promise<{ message: string }> {
-  return fetchApi<{ message: string }>(
-    "/auth/logout",
-    {
-      method: "POST",
-    },
-    true,
-  );
+  // call logout to clear refresh cookie server-side, then clear client state
+  try {
+    const result = await fetchApi<{ message: string }>(
+      "/auth/logout",
+      {
+        method: "POST",
+      },
+      true,
+    );
+    setAccessToken(null);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("questionwork_user");
+    }
+    return result;
+  } catch (err) {
+    // ensure client-side cleanup on any error
+    setAccessToken(null);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("questionwork_user");
+    }
+    throw err;
+  }
 }
 
 export async function checkHealth(): Promise<{

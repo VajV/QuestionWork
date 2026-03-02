@@ -3,19 +3,23 @@ Endpoints для работы с квестами
 CRUD: Create, Read, Update, Delete + отклики
 """
 
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+import asyncpg
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from app.core.rewards import (
     calculate_quest_rewards,
     calculate_xp_reward,
+    calculate_xp_to_next,
     check_level_up,
 )
 from app.core.security import decode_access_token
+from app.db.session import get_db_connection
 from app.models.quest import (
     Quest,
     QuestApplication,
@@ -23,80 +27,14 @@ from app.models.quest import (
     QuestCreate,
     QuestListResponse,
     QuestStatusEnum,
-    QuestUpdate,
 )
-from app.models.user import GradeEnum, UserProfile
+from app.models.user import GradeEnum, UserProfile, row_to_user_profile
+from app.core.otel_utils import db_span
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/quests", tags=["Quests"])
-
-# ============================================
-# Mock-хранилище квестов
-# ============================================
-
-QUESTS_DB: Dict[str, Quest] = {}
-APPLICATIONS_DB: Dict[str, QuestApplication] = {}
-
-# Демо-квесты
-DEMO_QUESTS = [
-    Quest(
-        id=str(uuid.uuid4()),
-        client_id="user_123456",
-        client_username="novice_dev",
-        title="Создать лендинг для кофейни",
-        description="Нужен одностраничный сайт для небольшой кофейни. Дизайн есть в Figma, нужно сверстать и натянуть на простую CMS.",
-        required_grade=GradeEnum.novice,
-        skills=["HTML", "CSS", "JavaScript"],
-        budget=5000,
-        currency="RUB",
-        xp_reward=100,
-        status=QuestStatusEnum.open,
-        applications=[],
-        assigned_to=None,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    ),
-    Quest(
-        id=str(uuid.uuid4()),
-        client_id="user_789012",
-        client_username="junior_coder",
-        title="Парсер данных с сайта",
-        description="Требуется написать парсер для сбора данных о товарах с маркетплейса. Python, BeautifulSoup/Selenium. Данные сохранять в CSV.",
-        required_grade=GradeEnum.junior,
-        skills=["Python", "Web Scraping", "BeautifulSoup"],
-        budget=15000,
-        currency="RUB",
-        xp_reward=200,
-        status=QuestStatusEnum.open,
-        applications=[],
-        assigned_to=None,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    ),
-    Quest(
-        id=str(uuid.uuid4()),
-        client_id="user_345678",
-        client_username="middle_master",
-        title="Telegram бот для записи клиентов",
-        description="Нужен бот для автоматизации записи клиентов в салон красоты. Интеграция с Google Calendar, уведомления, админка.",
-        required_grade=GradeEnum.middle,
-        skills=["Python", "aiogram", "Google API"],
-        budget=50000,
-        currency="RUB",
-        xp_reward=400,
-        status=QuestStatusEnum.in_progress,
-        applications=["user_123456"],
-        assigned_to="user_123456",
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    ),
-]
-
-for quest in DEMO_QUESTS:
-    QUESTS_DB[quest.id] = quest
-
 
 # ============================================
 # Вспомогательные функции
@@ -105,6 +43,7 @@ for quest in DEMO_QUESTS:
 
 async def get_current_user(
     authorization: Optional[str] = Header(None),
+    conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> Optional[UserProfile]:
     """Получить текущего пользователя из токена"""
     if not authorization or not authorization.startswith("Bearer "):
@@ -118,30 +57,17 @@ async def get_current_user(
         logger.warning("Invalid token")
         return None
 
-    from app.api.v1.endpoints.users import MOCK_USERS
-
     user_id = payload.get("sub")
 
-    # Try MOCK_USERS first (demo users)
-    user = MOCK_USERS.get(user_id)
-
-    # If not found, try USERS_DB (registered users)
-    if not user:
-        try:
-            from app.api.v1.endpoints.users import get_user_from_auth_db
-
-            user = get_user_from_auth_db(user_id)
-            if user:
-                logger.info(f"Found user in USERS_DB: {user.username}")
-        except ImportError as e:
-            logger.warning(f"Could not import get_user_from_auth_db: {e}")
-
-    if user:
+    with db_span("db.fetchrow", query="SELECT * FROM users WHERE id = $1", params=[user_id]):
+        row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+    if row:
+        user = row_to_user_profile(row)
         logger.info(f"User authenticated: {user.username} ({user.id})")
+        return user
     else:
         logger.warning(f"User not found: {user_id}")
-
-    return user
+        return None
 
 
 async def require_auth(
@@ -176,60 +102,141 @@ async def get_all_quests(
     skill_filter: Optional[str] = None,
     min_budget: Optional[float] = None,
     max_budget: Optional[float] = None,
+    conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Получить список всех квестов с фильтрацией"""
     logger.info(f"Getting quests: page={page}, status={status_filter}")
 
-    quests = list(QUESTS_DB.values())
+    query = "SELECT * FROM quests WHERE 1=1"
+    args = []
+    arg_idx = 1
 
     if status_filter:
-        quests = [q for q in quests if q.status == status_filter]
+        query += f" AND status = ${arg_idx}"
+        args.append(status_filter.value)
+        arg_idx += 1
     if grade_filter:
-        quests = [q for q in quests if q.required_grade == grade_filter]
+        query += f" AND required_grade = ${arg_idx}"
+        args.append(grade_filter.value)
+        arg_idx += 1
     if skill_filter:
-        quests = [
-            q for q in quests if skill_filter.lower() in [s.lower() for s in q.skills]
-        ]
+        query += f" AND skills::jsonb @> ${arg_idx}::jsonb"
+        args.append(json.dumps([skill_filter]))
+        arg_idx += 1
     if min_budget is not None:
-        quests = [q for q in quests if q.budget >= min_budget]
+        query += f" AND budget >= ${arg_idx}"
+        args.append(min_budget)
+        arg_idx += 1
     if max_budget is not None:
-        quests = [q for q in quests if q.budget <= max_budget]
+        query += f" AND budget <= ${arg_idx}"
+        args.append(max_budget)
+        arg_idx += 1
 
-    quests.sort(key=lambda q: q.created_at, reverse=True)
+    # Получаем общее количество
+    count_query = f"SELECT COUNT(*) FROM ({query}) as count_query"
+    with db_span("db.fetchval", query=count_query, params=args):
+        total = await conn.fetchval(count_query, *args)
 
-    total = len(quests)
-    start = (page - 1) * page_size
-    end = start + page_size
-    paginated_quests = quests[start:end]
+    # Добавляем сортировку и пагинацию
+    query += f" ORDER BY created_at DESC LIMIT ${arg_idx} OFFSET ${arg_idx + 1}"
+    args.extend([page_size, (page - 1) * page_size])
 
-    logger.info(f"Found {total} quests, returning {len(paginated_quests)}")
+    with db_span("db.fetch", query=query, params=args):
+        rows = await conn.fetch(query, *args)
+
+    # Batch-fetch all applications for these quests in a single query (fix N+1)
+    quest_ids = [row["id"] for row in rows]
+    apps_map: dict[str, list[str]] = {qid: [] for qid in quest_ids}
+    if quest_ids:
+        apps_query = "SELECT quest_id, freelancer_id FROM applications WHERE quest_id = ANY($1)"
+        with db_span("db.fetch", query=apps_query, params=[quest_ids]):
+            app_rows = await conn.fetch(apps_query, quest_ids)
+        for app_row in app_rows:
+            apps_map[app_row["quest_id"]].append(app_row["freelancer_id"])
+
+    quests = []
+    for row in rows:
+        applications = apps_map.get(row["id"], [])
+
+        quests.append(
+            Quest(
+                id=row["id"],
+                client_id=row["client_id"],
+                client_username=row["client_username"],
+                title=row["title"],
+                description=row["description"],
+                required_grade=GradeEnum(row["required_grade"]),
+                skills=json.loads(row["skills"]) if row["skills"] else [],
+                budget=float(row["budget"]),
+                currency=row["currency"],
+                xp_reward=row["xp_reward"],
+                status=QuestStatusEnum(row["status"]),
+                applications=applications,
+                assigned_to=row["assigned_to"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                completed_at=row["completed_at"],
+            )
+        )
+
+    logger.info(f"Found {total} quests, returning {len(quests)}")
+
+    safe_total = int(total or 0)
 
     return QuestListResponse(
-        quests=paginated_quests,
-        total=total,
+        quests=quests,
+        total=safe_total,
         page=page,
         page_size=page_size,
-        has_more=end < total,
+        has_more=page * page_size < safe_total,
     )
 
 
 @router.get("/{quest_id}", response_model=Quest)
-async def get_quest(quest_id: str):
+async def get_quest(
+    quest_id: str, conn: asyncpg.Connection = Depends(get_db_connection)
+):
     """Получить детали квеста по ID"""
     logger.info(f"Getting quest: {quest_id}")
 
-    if quest_id not in QUESTS_DB:
+    with db_span("db.fetchrow", query="SELECT * FROM quests WHERE id = $1", params=[quest_id]):
+        row = await conn.fetchrow("SELECT * FROM quests WHERE id = $1", quest_id)
+    if not row:
         logger.warning(f"Quest not found: {quest_id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Quest not found"
         )
 
-    return QUESTS_DB[quest_id]
+    apps_query = "SELECT freelancer_id FROM applications WHERE quest_id = $1"
+    with db_span("db.fetch", query=apps_query, params=[quest_id]):
+        app_rows = await conn.fetch(apps_query, quest_id)
+    applications = [app_row["freelancer_id"] for app_row in app_rows]
+
+    return Quest(
+        id=row["id"],
+        client_id=row["client_id"],
+        client_username=row["client_username"],
+        title=row["title"],
+        description=row["description"],
+        required_grade=GradeEnum(row["required_grade"]),
+        skills=json.loads(row["skills"]) if row["skills"] else [],
+        budget=float(row["budget"]),
+        currency=row["currency"],
+        xp_reward=row["xp_reward"],
+        status=QuestStatusEnum(row["status"]),
+        applications=applications,
+        assigned_to=row["assigned_to"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        completed_at=row["completed_at"],
+    )
 
 
 @router.post("/", response_model=Quest, status_code=status.HTTP_201_CREATED)
 async def create_quest(
-    quest_data: QuestCreate, current_user: UserProfile = Depends(require_auth)
+    quest_data: QuestCreate,
+    current_user: UserProfile = Depends(require_auth),
+    conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Создать новый квест"""
     logger.info(f"Creating quest for user: {current_user.username}")
@@ -242,8 +249,34 @@ async def create_quest(
             user_grade=GradeEnum.novice,
         )
 
+    quest_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+
+    with db_span("db.execute", query="INSERT INTO quests (...) VALUES (...)", params=[quest_id, current_user.id, current_user.username]):
+        await conn.execute(
+        """
+        INSERT INTO quests (
+            id, client_id, client_username, title, description, required_grade,
+            skills, budget, currency, xp_reward, status, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        """,
+        quest_id,
+        current_user.id,
+        current_user.username,
+        quest_data.title,
+        quest_data.description,
+        quest_data.required_grade.value,
+        json.dumps(quest_data.skills),
+        quest_data.budget,
+        quest_data.currency,
+        xp_reward,
+        QuestStatusEnum.open.value,
+        now,
+        now,
+    )
+
     quest = Quest(
-        id=str(uuid.uuid4()),
+        id=quest_id,
         client_id=current_user.id,
         client_username=current_user.username,
         title=quest_data.title,
@@ -256,11 +289,11 @@ async def create_quest(
         status=QuestStatusEnum.open,
         applications=[],
         assigned_to=None,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=now,
+        updated_at=now,
+        completed_at=None,
     )
 
-    QUESTS_DB[quest.id] = quest
     logger.info(f"Quest created: {quest.id}")
 
     return quest
@@ -271,73 +304,102 @@ async def apply_to_quest(
     quest_id: str,
     application_data: QuestApplicationCreate,
     current_user: UserProfile = Depends(require_auth),
+    conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Откликнуться на квест"""
     logger.info(f"Apply request: quest_id={quest_id}, user={current_user.username}")
 
     logger.info(f"User authenticated: {current_user.username} ({current_user.id})")
 
-    if quest_id not in QUESTS_DB:
+    with db_span("db.fetchrow", query="SELECT * FROM quests WHERE id = $1", params=[quest_id]):
+        quest = await conn.fetchrow("SELECT * FROM quests WHERE id = $1", quest_id)
+    if not quest:
         logger.error(f"Quest not found: {quest_id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Quest not found"
         )
 
-    quest = QUESTS_DB[quest_id]
-    logger.info(f"Quest found: {quest.title}, status={quest.status}")
+    logger.info(f"Quest found: {quest['title']}, status={quest['status']}")
 
-    if quest.status != QuestStatusEnum.open:
-        logger.error(f"Quest status is not open: {quest.status}")
+    if quest["status"] != QuestStatusEnum.open.value:
+        logger.error(f"Quest status is not open: {quest['status']}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot apply to quest with status: {quest.status}",
+            detail=f"Cannot apply to quest with status: {quest['status']}",
         )
 
-    if quest.client_id == current_user.id:
+    if quest["client_id"] == current_user.id:
         logger.error("User trying to apply to own quest")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot apply to your own quest",
         )
 
-    if current_user.id in quest.applications:
+    with db_span("db.fetchrow", query="SELECT id FROM applications WHERE quest_id = $1 AND freelancer_id = $2", params=[quest_id, current_user.id]):
+        existing_app = await conn.fetchrow(
+            "SELECT id FROM applications WHERE quest_id = $1 AND freelancer_id = $2",
+            quest_id,
+            current_user.id,
+        )
+
+    if existing_app:
         logger.error("User already applied")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You have already applied to this quest",
         )
 
-    quest_grade_level = get_user_grade_level(quest.required_grade)
+    quest_required_grade = GradeEnum(quest["required_grade"])
+    quest_grade_level = get_user_grade_level(quest_required_grade)
     user_grade_level = get_user_grade_level(current_user.grade)
 
     logger.info(
-        f"Grade check: quest requires {quest.required_grade} (level {quest_grade_level}), user has {current_user.grade} (level {user_grade_level})"
+        f"Grade check: quest requires {quest_required_grade} (level {quest_grade_level}), user has {current_user.grade} (level {user_grade_level})"
     )
 
     if user_grade_level < quest_grade_level:
         logger.error(
-            f"User grade too low: {current_user.grade} < {quest.required_grade}"
+            f"User grade too low: {current_user.grade} < {quest_required_grade}"
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Your grade ({current_user.grade}) is lower than required ({quest.required_grade})",
+            detail=f"Your grade ({current_user.grade}) is lower than required ({quest_required_grade})",
         )
 
-    quest.applications.append(current_user.id)
-    quest.updated_at = datetime.now(timezone.utc)
+    application_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+
+    with db_span("db.execute", query="INSERT INTO applications (...) VALUES (...)", params=[application_id, quest_id, current_user.id]):
+        await conn.execute(
+        """
+        INSERT INTO applications (
+            id, quest_id, freelancer_id, freelancer_username, freelancer_grade,
+            cover_letter, proposed_price, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        """,
+        application_id,
+        quest_id,
+        current_user.id,
+        current_user.username,
+        str(current_user.grade),
+        application_data.cover_letter,
+        application_data.proposed_price,
+        now,
+    )
+
+    with db_span("db.execute", query="UPDATE quests SET updated_at = $1 WHERE id = $2", params=[now, quest_id]):
+        await conn.execute("UPDATE quests SET updated_at = $1 WHERE id = $2", now, quest_id)
 
     application = QuestApplication(
-        id=str(uuid.uuid4()),
+        id=application_id,
         quest_id=quest_id,
         freelancer_id=current_user.id,
         freelancer_username=current_user.username,
         freelancer_grade=current_user.grade,
         cover_letter=application_data.cover_letter,
         proposed_price=application_data.proposed_price,
-        created_at=datetime.now(timezone.utc),
+        created_at=now,
     )
-
-    APPLICATIONS_DB[application.id] = application
 
     logger.info(f"Application successful: {application.id}")
 
@@ -346,235 +408,375 @@ async def apply_to_quest(
 
 @router.post("/{quest_id}/assign")
 async def assign_quest(
-    quest_id: str, freelancer_id: str, current_user: UserProfile = Depends(require_auth)
+    quest_id: str,
+    freelancer_id: str,
+    current_user: UserProfile = Depends(require_auth),
+    conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Назначить исполнителя на квест"""
     logger.info(f"Assign request: quest_id={quest_id}, freelancer={freelancer_id}")
 
-    if quest_id not in QUESTS_DB:
+    with db_span("db.fetchrow", query="SELECT * FROM quests WHERE id = $1", params=[quest_id]):
+        quest = await conn.fetchrow("SELECT * FROM quests WHERE id = $1", quest_id)
+    if not quest:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Quest not found"
         )
 
-    quest = QUESTS_DB[quest_id]
-
-    if quest.client_id != current_user.id:
+    if quest["client_id"] != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only client can assign freelancer",
         )
 
-    if quest.status != QuestStatusEnum.open:
+    if quest["status"] != QuestStatusEnum.open.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot assign freelancer to quest with status: {quest.status}",
+            detail=f"Cannot assign freelancer to quest with status: {quest['status']}",
         )
 
-    if freelancer_id not in quest.applications:
+    with db_span("db.fetchrow", query="SELECT id FROM applications WHERE quest_id = $1 AND freelancer_id = $2", params=[quest_id, freelancer_id]):
+        app = await conn.fetchrow(
+            "SELECT id FROM applications WHERE quest_id = $1 AND freelancer_id = $2",
+            quest_id,
+            freelancer_id,
+        )
+
+    if not app:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This user has not applied to the quest",
         )
 
-    quest.assigned_to = freelancer_id
-    quest.status = QuestStatusEnum.in_progress
-    quest.updated_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    with db_span("db.execute", query="UPDATE quests SET assigned_to = $1, status = $2, updated_at = $3 WHERE id = $4", params=[freelancer_id, QuestStatusEnum.in_progress.value, now, quest_id]):
+        await conn.execute(
+            "UPDATE quests SET assigned_to = $1, status = $2, updated_at = $3 WHERE id = $4",
+            freelancer_id,
+            QuestStatusEnum.in_progress.value,
+            now,
+            quest_id,
+        )
 
     logger.info(f"Freelancer assigned: {freelancer_id}")
 
-    return {"message": "Freelancer assigned successfully", "quest": quest}
+    with db_span("db.fetchrow", query="SELECT * FROM quests WHERE id = $1", params=[quest_id]):
+        updated_quest_row = await conn.fetchrow(
+            "SELECT * FROM quests WHERE id = $1", quest_id
+        )
+    with db_span("db.fetch", query="SELECT freelancer_id FROM applications WHERE quest_id = $1", params=[quest_id]):
+        app_rows = await conn.fetch(
+            "SELECT freelancer_id FROM applications WHERE quest_id = $1",
+            quest_id,
+        )
+    applications = [app_row["freelancer_id"] for app_row in app_rows]
 
-
-@router.post("/{quest_id}/complete")
-async def complete_quest(
-    quest_id: str, current_user: UserProfile = Depends(require_auth)
-):
-    """Завершить квест (исполнитель)"""
-    logger.info(f"Complete request: quest_id={quest_id}")
-
-    if quest_id not in QUESTS_DB:
+    if not updated_quest_row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Quest not found"
         )
 
-    quest = QUESTS_DB[quest_id]
+    quest_payload = Quest(
+        id=updated_quest_row["id"],
+        client_id=updated_quest_row["client_id"],
+        client_username=updated_quest_row["client_username"],
+        title=updated_quest_row["title"],
+        description=updated_quest_row["description"],
+        required_grade=GradeEnum(updated_quest_row["required_grade"]),
+        skills=json.loads(updated_quest_row["skills"])
+        if updated_quest_row["skills"]
+        else [],
+        budget=float(updated_quest_row["budget"]),
+        currency=updated_quest_row["currency"],
+        xp_reward=updated_quest_row["xp_reward"],
+        status=QuestStatusEnum(updated_quest_row["status"]),
+        applications=applications,
+        assigned_to=updated_quest_row["assigned_to"],
+        created_at=updated_quest_row["created_at"],
+        updated_at=updated_quest_row["updated_at"],
+        completed_at=updated_quest_row["completed_at"],
+    )
 
-    if quest.status != QuestStatusEnum.in_progress:
+    return {"message": "Freelancer assigned successfully", "quest": quest_payload}
+
+
+@router.post("/{quest_id}/complete")
+async def complete_quest(
+    quest_id: str,
+    current_user: UserProfile = Depends(require_auth),
+    conn: asyncpg.Connection = Depends(get_db_connection),
+):
+    """Завершить квест (исполнитель)"""
+    logger.info(f"Complete request: quest_id={quest_id}")
+
+    quest = await conn.fetchrow("SELECT * FROM quests WHERE id = $1", quest_id)
+    if not quest:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Quest not found"
+        )
+
+    if quest["status"] != QuestStatusEnum.in_progress.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Can only complete quest that is in progress",
         )
 
-    if quest.assigned_to != current_user.id:
+    if quest["assigned_to"] != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only assigned freelancer can complete quest",
         )
 
-    quest.status = QuestStatusEnum.completed
-    quest.completed_at = datetime.now(timezone.utc)
-    quest.updated_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    with db_span("db.execute", query="UPDATE quests SET status = $1, completed_at = $2, updated_at = $3 WHERE id = $4", params=[QuestStatusEnum.completed.value, now, now, quest_id]):
+        await conn.execute(
+            "UPDATE quests SET status = $1, completed_at = $2, updated_at = $3 WHERE id = $4",
+            QuestStatusEnum.completed.value,
+            now,
+            now,
+            quest_id,
+        )
 
     logger.info(f"Quest completed by freelancer: {current_user.id}")
 
+    with db_span("db.fetchrow", query="SELECT * FROM quests WHERE id = $1", params=[quest_id]):
+        updated_quest_row = await conn.fetchrow(
+            "SELECT * FROM quests WHERE id = $1", quest_id
+        )
+    with db_span("db.fetch", query="SELECT freelancer_id FROM applications WHERE quest_id = $1", params=[quest_id]):
+        app_rows = await conn.fetch(
+            "SELECT freelancer_id FROM applications WHERE quest_id = $1",
+            quest_id,
+        )
+    applications = [app_row["freelancer_id"] for app_row in app_rows]
+
+    if not updated_quest_row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Quest not found"
+        )
+
+    quest_payload = Quest(
+        id=updated_quest_row["id"],
+        client_id=updated_quest_row["client_id"],
+        client_username=updated_quest_row["client_username"],
+        title=updated_quest_row["title"],
+        description=updated_quest_row["description"],
+        required_grade=GradeEnum(updated_quest_row["required_grade"]),
+        skills=json.loads(updated_quest_row["skills"])
+        if updated_quest_row["skills"]
+        else [],
+        budget=float(updated_quest_row["budget"]),
+        currency=updated_quest_row["currency"],
+        xp_reward=updated_quest_row["xp_reward"],
+        status=QuestStatusEnum(updated_quest_row["status"]),
+        applications=applications,
+        assigned_to=updated_quest_row["assigned_to"],
+        created_at=updated_quest_row["created_at"],
+        updated_at=updated_quest_row["updated_at"],
+        completed_at=updated_quest_row["completed_at"],
+    )
+
     return {
         "message": "Quest marked as completed. Awaiting client confirmation.",
-        "quest": quest,
-        "xp_earned": quest.xp_reward,
+        "quest": quest_payload,
+        "xp_earned": quest["xp_reward"],
     }
 
 
 @router.post("/{quest_id}/confirm")
 async def confirm_quest_completion(
-    quest_id: str, current_user: UserProfile = Depends(require_auth)
+    quest_id: str,
+    current_user: UserProfile = Depends(require_auth),
+    conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """
     Подтвердить завершение квеста (клиент)
 
     Это основной endpoint для подтверждения выполнения квеста.
     После подтверждения:
-    - Статус квеста меняется на "completed"
+    - Статус квеста остается "completed" (или можно поменять на paid)
     - Фрилансер получает XP и деньги
     - Клиент получает подтверждение
     """
     logger.info(f"Confirm request: quest_id={quest_id}")
 
-    if quest_id not in QUESTS_DB:
+    with db_span("db.fetchrow", query="SELECT * FROM quests WHERE id = $1", params=[quest_id]):
+        quest = await conn.fetchrow("SELECT * FROM quests WHERE id = $1", quest_id)
+    if not quest:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Quest not found"
         )
 
-    quest = QUESTS_DB[quest_id]
-
-    if quest.client_id != current_user.id:
+    if quest["client_id"] != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only client can confirm completion",
         )
 
-    if quest.status != QuestStatusEnum.completed:
+    if quest["status"] != QuestStatusEnum.completed.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Quest has not been marked as completed by freelancer",
         )
 
-    # Получаем данные фрилансера (сначала MOCK_USERS, потом auth.USERS_DB)
-    from app.api.v1.endpoints.users import MOCK_USERS, get_user_from_auth_db
-
-    freelancer = MOCK_USERS.get(quest.assigned_to) or get_user_from_auth_db(
-        quest.assigned_to
+    freelancer_row = await conn.fetchrow(
+        "SELECT * FROM users WHERE id = $1", quest["assigned_to"]
     )
-
-    if not freelancer:
-        logger.error(f"Freelancer not found: {quest.assigned_to}")
+    if not freelancer_row:
+        logger.error(f"Freelancer not found: {quest['assigned_to']}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Freelancer not found"
         )
 
     # Расчёт наград
+    quest_grade = GradeEnum(quest["required_grade"])
+    freelancer_grade = GradeEnum(freelancer_row["grade"])
+
     xp_reward, money_reward = calculate_quest_rewards(
-        budget=quest.budget,
-        quest_grade=quest.required_grade,
-        user_grade=freelancer.grade,
+        budget=float(quest["budget"]),
+        quest_grade=quest_grade,
+        user_grade=freelancer_grade,
     )
 
     logger.info(
-        f"Quest confirmed. Freelancer: {freelancer.username}, XP: {xp_reward}, Money: {money_reward}"
+        f"Quest confirmed. Freelancer: {freelancer_row['username']}, XP: {xp_reward}, Money: {money_reward}"
     )
 
     # Начисляем XP фрилансеру
-    freelancer.xp += xp_reward
-    freelancer.updated_at = datetime.now(timezone.utc)
+    new_xp = freelancer_row["xp"] + xp_reward
+    now = datetime.now(timezone.utc)
 
     # Проверяем повышение грейда/уровня
-    level_up, new_grade, new_level = check_level_up(freelancer.xp, freelancer.grade)
+    level_up, new_grade, new_level = check_level_up(new_xp, freelancer_grade)
     if level_up:
-        freelancer.grade = new_grade
-        logger.info(f"Level up! {freelancer.username} is now {new_grade}")
-    freelancer.level = new_level
+        logger.info(f"Level up! {freelancer_row['username']} is now {new_grade}")
 
-    # Сохраняем обновлённого фрилансера в обоих хранилищах
-    from app.api.v1.endpoints.users import MOCK_USERS as _MOCK_USERS
+    # Calculate xp_to_next for the (possibly new) grade
+    new_xp_to_next = calculate_xp_to_next(new_xp, new_grade)
 
-    if quest.assigned_to in _MOCK_USERS:
-        _MOCK_USERS[quest.assigned_to] = freelancer
+    # Сохраняем обновлённого фрилансера в БД
+    await conn.execute(
+        """
+        UPDATE users
+        SET xp = $1, level = $2, grade = $3, xp_to_next = $4, updated_at = $5
+        WHERE id = $6
+        """,
+        new_xp,
+        new_level,
+        new_grade.value,
+        new_xp_to_next,
+        now,
+        quest["assigned_to"],
+    )
 
-    try:
-        from app.api.v1.endpoints import auth as _auth
-
-        for _uname, _uinfo in _auth.USERS_DB.items():
-            if _uinfo["profile"].id == quest.assigned_to:
-                _uinfo["profile"].xp = freelancer.xp
-                _uinfo["profile"].level = freelancer.level
-                _uinfo["profile"].grade = freelancer.grade
-                _uinfo["profile"].updated_at = freelancer.updated_at
-                break
-    except (ImportError, AttributeError):
-        pass
+    await conn.execute(
+        """
+        INSERT INTO transactions (id, user_id, quest_id, amount, currency, type, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        """,
+        str(uuid.uuid4()),
+        quest["assigned_to"],
+        quest_id,
+        float(quest["budget"]),
+        quest["currency"],
+        "income",
+        now,
+    )
 
     return {
         "message": "Quest confirmed! Reward has been paid.",
-        "quest": quest,
         "xp_reward": xp_reward,
         "money_reward": money_reward,
-        "freelancer_username": freelancer.username,
+        "freelancer_username": freelancer_row["username"],
     }
 
 
 @router.post("/{quest_id}/cancel")
 async def cancel_quest(
-    quest_id: str, current_user: UserProfile = Depends(require_auth)
+    quest_id: str,
+    current_user: UserProfile = Depends(require_auth),
+    conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Отменить квест"""
     logger.info(f"Cancel request: quest_id={quest_id}")
 
-    if quest_id not in QUESTS_DB:
+    quest = await conn.fetchrow("SELECT * FROM quests WHERE id = $1", quest_id)
+    if not quest:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Quest not found"
         )
 
-    quest = QUESTS_DB[quest_id]
-
-    if quest.client_id != current_user.id:
+    if quest["client_id"] != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Only client can cancel quest"
         )
 
-    if quest.status in [QuestStatusEnum.completed, QuestStatusEnum.cancelled]:
+    if quest["status"] in [
+        QuestStatusEnum.completed.value,
+        QuestStatusEnum.cancelled.value,
+    ]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot cancel quest with status: {quest.status}",
+            detail=f"Cannot cancel quest with status: {quest['status']}",
         )
 
-    quest.status = QuestStatusEnum.cancelled
-    quest.updated_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    with db_span("db.execute", query="UPDATE quests SET status = $1, updated_at = $2 WHERE id = $3", params=[QuestStatusEnum.cancelled.value, now, quest_id]):
+        await conn.execute(
+            "UPDATE quests SET status = $1, updated_at = $2 WHERE id = $3",
+            QuestStatusEnum.cancelled.value,
+            now,
+            quest_id,
+        )
 
     logger.info(f"Quest cancelled: {quest_id}")
 
-    return {"message": "Quest cancelled successfully", "quest": quest}
+    return {"message": "Quest cancelled successfully"}
 
 
 @router.get("/{quest_id}/applications")
 async def get_quest_applications(
-    quest_id: str, current_user: UserProfile = Depends(require_auth)
+    quest_id: str,
+    current_user: UserProfile = Depends(require_auth),
+    conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Получить список откликов на квест"""
     logger.info(f"Get applications: quest_id={quest_id}")
 
-    if quest_id not in QUESTS_DB:
+    with db_span("db.fetchrow", query="SELECT * FROM quests WHERE id = $1", params=[quest_id]):
+        quest = await conn.fetchrow("SELECT * FROM quests WHERE id = $1", quest_id)
+    if not quest:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Quest not found"
         )
 
-    quest = QUESTS_DB[quest_id]
-
-    if quest.client_id != current_user.id:
+    if quest["client_id"] != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only client can view applications",
         )
 
-    applications = [app for app in APPLICATIONS_DB.values() if app.quest_id == quest_id]
+    with db_span("db.fetch", query="SELECT * FROM applications WHERE quest_id = $1 ORDER BY created_at DESC", params=[quest_id]):
+        rows = await conn.fetch(
+            "SELECT * FROM applications WHERE quest_id = $1 ORDER BY created_at DESC",
+            quest_id,
+        )
+
+    applications = [
+        QuestApplication(
+            id=row["id"],
+            quest_id=row["quest_id"],
+            freelancer_id=row["freelancer_id"],
+            freelancer_username=row["freelancer_username"],
+            freelancer_grade=GradeEnum(row["freelancer_grade"]),
+            cover_letter=row["cover_letter"],
+            proposed_price=float(row["proposed_price"])
+            if row["proposed_price"]
+            else None,
+            created_at=row["created_at"],
+        )
+        for row in rows
+    ]
 
     logger.info(f"Found {len(applications)} applications")
 

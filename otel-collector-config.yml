@@ -1,0 +1,22 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+      grpc: {}
+
+processors:
+  batch:
+exporters:
+  logging:
+    logLevel: info
+  jaeger:
+    # send to Jaeger collector HTTP endpoint exposed by jaeger all-in-one
+    endpoint: "http://jaeger:14268/api/traces"
+    insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging, jaeger]

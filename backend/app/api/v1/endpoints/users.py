@@ -2,105 +2,32 @@
 Endpoints для работы с пользователями
 """
 
+import json
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, status
+import asyncpg
+from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.models.user import GradeEnum, UserBadge, UserProfile, UserRoleEnum, UserStats
+from app.db.session import get_db_connection
+from app.models.user import GradeEnum, UserBadge, UserProfile, UserRoleEnum, UserStats, row_to_user_profile
+from app.core.otel_utils import db_span
 
 router = APIRouter(prefix="/users", tags=["Пользователи"])
 
-MOCK_USERS: Dict[str, UserProfile] = {
-    "user_123456": UserProfile(
-        id="user_123456",
-        username="novice_dev",
-        email="novice@example.com",
-        role=UserRoleEnum.freelancer,
-        level=1,
-        grade=GradeEnum.novice,
-        xp=0,
-        xp_to_next=100,
-        stats=UserStats(int=10, dex=10, cha=10),
-        badges=[],
-        created_at=datetime(2026, 2, 28),
-        updated_at=datetime(2026, 2, 28),
-    ),
-    "user_client_001": UserProfile(
-        id="user_client_001",
-        username="client_user",
-        email="client@example.com",
-        role=UserRoleEnum.client,
-        level=1,
-        grade=GradeEnum.novice,
-        xp=0,
-        xp_to_next=100,
-        stats=UserStats(int=10, dex=10, cha=10),
-        badges=[],
-        created_at=datetime(2026, 2, 28),
-        updated_at=datetime(2026, 2, 28),
-    ),
-    "user_789012": UserProfile(
-        id="user_789012",
-        username="junior_coder",
-        email="junior@example.com",
-        role=UserRoleEnum.freelancer,
-        level=5,
-        grade=GradeEnum.junior,
-        xp=450,
-        xp_to_next=500,
-        stats=UserStats(int=15, dex=12, cha=14),
-        badges=[
-            UserBadge(
-                id="badge_001",
-                name="Первый квест",
-                description="Выполнить первый квест",
-                icon="🎯",
-                earned_at=datetime(2026, 2, 25),
-            )
-        ],
-        created_at=datetime(2026, 1, 15),
-        updated_at=datetime(2026, 2, 28),
-    ),
-    "user_345678": UserProfile(
-        id="user_345678",
-        username="middle_master",
-        email="middle@example.com",
-        role=UserRoleEnum.freelancer,
-        level=15,
-        grade=GradeEnum.middle,
-        xp=1200,
-        xp_to_next=1500,
-        stats=UserStats(int=25, dex=20, cha=22),
-        badges=[],
-        created_at=datetime(2025, 10, 1),
-        updated_at=datetime(2026, 2, 28),
-    ),
-}
-
-
-def get_user_from_auth_db(user_id: str) -> Optional[UserProfile]:
-    try:
-        from app.api.v1.endpoints import auth
-        for username, user_info in auth.USERS_DB.items():
-            if user_info["profile"].id == user_id:
-                return user_info["profile"]
-    except (ImportError, AttributeError):
-        pass
-    return None
-
 
 @router.get("/{user_id}", response_model=UserProfile)
-async def get_user_profile(user_id: str):
-    if user_id in MOCK_USERS:
-        return MOCK_USERS[user_id]
-    user = get_user_from_auth_db(user_id)
-    if user:
-        return user
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"Пользователь с ID {user_id} не найден",
-    )
+async def get_user_profile(
+    user_id: str, conn: asyncpg.Connection = Depends(get_db_connection)
+):
+    with db_span("db.fetchrow", query="SELECT * FROM users WHERE id = $1", params=[user_id]):
+        row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Пользователь с ID {user_id} не найден",
+        )
+    return row_to_user_profile(row)
 
 
 @router.get("/", response_model=List[UserProfile])
@@ -109,23 +36,44 @@ async def get_all_users(
     limit: int = 10,
     grade: Optional[str] = None,
     role: Optional[str] = None,
+    conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    users = list(MOCK_USERS.values())
+    query = "SELECT * FROM users WHERE 1=1"
+    args = []
+    arg_idx = 1
+
     if grade:
-        users = [u for u in users if u.grade == grade]
+        query += f" AND grade = ${arg_idx}"
+        args.append(grade)
+        arg_idx += 1
     if role:
-        users = [u for u in users if u.role == role]
-    return users[skip : skip + limit]
+        query += f" AND role = ${arg_idx}"
+        args.append(role)
+        arg_idx += 1
+
+    query += f" ORDER BY created_at DESC LIMIT ${arg_idx} OFFSET ${arg_idx + 1}"
+    args.extend([limit, skip])
+
+    with db_span("db.fetch", query=query, params=args):
+        rows = await conn.fetch(query, *args)
+    return [row_to_user_profile(row) for row in rows]
 
 
-@router.get("/{user_id}/stats")
-async def get_user_stats(user_id: str):
-    if user_id not in MOCK_USERS:
-        user = get_user_from_auth_db(user_id)
-        if user:
-            return user.stats
+@router.get("/{user_id}/stats", response_model=UserStats)
+async def get_user_stats(
+    user_id: str, conn: asyncpg.Connection = Depends(get_db_connection)
+):
+    with db_span("db.fetchrow", query="SELECT stats_int, stats_dex, stats_cha FROM users WHERE id = $1", params=[user_id]):
+        row = await conn.fetchrow(
+            "SELECT stats_int, stats_dex, stats_cha FROM users WHERE id = $1", user_id
+        )
+    if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Пользователь с ID {user_id} не найден",
         )
-    return MOCK_USERS[user_id].stats
+    return UserStats(
+        int=row["stats_int"],
+        dex=row["stats_dex"],
+        cha=row["stats_cha"],
+    )

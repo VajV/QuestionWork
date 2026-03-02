@@ -5,10 +5,10 @@ interface LevelBadgeProps {
 }
 
 const gradeColors = {
-  Novice: 'from-gray-500 to-gray-700',
-  Junior: 'from-green-500 to-green-700',
-  Middle: 'from-blue-500 to-blue-700',
-  Senior: 'from-purple-500 to-purple-700',
+  novice: 'from-gray-500 to-gray-700',
+  junior: 'from-green-500 to-green-700',
+  middle: 'from-blue-500 to-blue-700',
+  senior: 'from-purple-500 to-purple-700',
 };
 
 export default function LevelBadge({ level, grade, size = 'md' }: LevelBadgeProps) {

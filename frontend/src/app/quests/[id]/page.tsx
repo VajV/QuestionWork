@@ -17,6 +17,7 @@ import { useAuth } from "@/context/AuthContext";
 import {
   getQuest,
   applyToQuest,
+  assignQuest,
   completeQuest,
   confirmQuest,
   cancelQuest,
@@ -203,8 +204,15 @@ export default function QuestDetailPage() {
 
     setActionLoading("assign");
     try {
-      // TODO: Реализовать endpoint assign
-      showMessage("✅ Исполнитель назначен (функция в разработке)");
+      const result = await assignQuest(quest.id, _freelancerId);
+      showMessage(`✅ ${result.message}`);
+      const updated = await getQuest(quest.id);
+      setQuest(updated);
+      // Refresh applications list
+      try {
+        const appsData = await getQuestApplications(quest.id);
+        setApplications(appsData.applications);
+      } catch (_) {}
     } catch (_err) {
       showMessage("❌ Ошибка при назначении");
     } finally {

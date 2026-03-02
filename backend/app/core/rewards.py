@@ -144,19 +144,46 @@ def calculate_quest_rewards(
     return (xp_reward, money_reward)
 
 
+# Cumulative XP thresholds for grade promotion (single source of truth)
+GRADE_XP_THRESHOLDS = {
+    GradeEnum.novice: 500,    # 500 XP → junior
+    GradeEnum.junior: 2000,   # 2000 XP → middle
+    GradeEnum.middle: 5000,   # 5000 XP → senior
+}
+
+# Ordered promotion path
+GRADE_PROMOTION = {
+    GradeEnum.novice: GradeEnum.junior,
+    GradeEnum.junior: GradeEnum.middle,
+    GradeEnum.middle: GradeEnum.senior,
+}
+
+
 def get_grade_xp_requirements() -> dict:
     """
     Требования к опыту для каждого грейда
     
     Returns:
-        Словарь {grade: {level, xp_required}}
+        Словарь {grade: {level, xp_to_next}}
+        xp_to_next = cumulative XP needed to reach next grade (or 0 for max grade)
     """
     return {
-        GradeEnum.novice: {"level": 1, "xp_to_next": 100},
-        GradeEnum.junior: {"level": 5, "xp_to_next": 500},
-        GradeEnum.middle: {"level": 15, "xp_to_next": 1500},
-        GradeEnum.senior: {"level": 30, "xp_to_next": 3000},
+        GradeEnum.novice: {"level": 1, "xp_to_next": GRADE_XP_THRESHOLDS[GradeEnum.novice]},
+        GradeEnum.junior: {"level": 5, "xp_to_next": GRADE_XP_THRESHOLDS[GradeEnum.junior]},
+        GradeEnum.middle: {"level": 15, "xp_to_next": GRADE_XP_THRESHOLDS[GradeEnum.middle]},
+        GradeEnum.senior: {"level": 30, "xp_to_next": 0},
     }
+
+
+def calculate_xp_to_next(current_xp: int, grade: GradeEnum) -> int:
+    """Calculate remaining XP until next grade promotion.
+
+    Returns 0 when already at max grade (senior).
+    """
+    threshold = GRADE_XP_THRESHOLDS.get(grade)
+    if threshold is None:
+        return 0  # senior — max grade
+    return max(0, threshold - current_xp)
 
 
 def check_level_up(current_xp: int, current_grade: GradeEnum) -> Tuple[bool, GradeEnum, int]:
@@ -170,24 +197,17 @@ def check_level_up(current_xp: int, current_grade: GradeEnum) -> Tuple[bool, Gra
     Returns:
         Кортеж (level_up_occurred, new_grade, new_level)
     """
-    requirements = get_grade_xp_requirements()
-    
     # Текущий уровень (примерный, на основе XP)
     # Формула: level = sqrt(xp / 10) + 1
     estimated_level = int((current_xp / 10) ** 0.5) + 1
     
-    # Проверка повышения грейда
+    # Проверка повышения грейда using single source of truth
     new_grade = current_grade
     level_up = False
     
-    if current_grade == GradeEnum.novice and current_xp >= 500:
-        new_grade = GradeEnum.junior
-        level_up = True
-    elif current_grade == GradeEnum.junior and current_xp >= 2000:
-        new_grade = GradeEnum.middle
-        level_up = True
-    elif current_grade == GradeEnum.middle and current_xp >= 5000:
-        new_grade = GradeEnum.senior
+    threshold = GRADE_XP_THRESHOLDS.get(current_grade)
+    if threshold is not None and current_xp >= threshold:
+        new_grade = GRADE_PROMOTION[current_grade]
         level_up = True
     
     return (level_up, new_grade, estimated_level)

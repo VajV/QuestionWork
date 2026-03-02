@@ -2,6 +2,8 @@
 Pydantic модели пользователя
 """
 
+import json
+
 from pydantic import BaseModel, Field, EmailStr
 from typing import Optional, List
 from datetime import datetime, timezone
@@ -71,3 +73,30 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserProfile
+
+
+def row_to_user_profile(row) -> UserProfile:
+    """Convert an asyncpg Record (or dict-like) to UserProfile.
+
+    Centralises the repetitive row→model mapping used across auth, users and quests endpoints.
+    """
+    return UserProfile(
+        id=row["id"],
+        username=row["username"],
+        email=row["email"],
+        role=UserRoleEnum(row["role"]),
+        level=row["level"],
+        grade=GradeEnum(row["grade"]),
+        xp=row["xp"],
+        xp_to_next=row["xp_to_next"],
+        stats=UserStats(
+            int=row["stats_int"],
+            dex=row["stats_dex"],
+            cha=row["stats_cha"],
+        ),
+        badges=json.loads(row["badges"]) if row["badges"] else [],
+        bio=row["bio"],
+        skills=json.loads(row["skills"]) if row["skills"] else [],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )

@@ -20,6 +20,7 @@ import {
   register as apiRegister,
   logout as apiLogout,
   getUserProfile,
+  setAccessToken,
 } from "@/lib/api";
 import type { UserProfile, LoginData, RegisterData } from "@/lib/api";
 
@@ -79,35 +80,34 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        // Восстанавливаем токен
-        const storedToken = localStorage.getItem(STORAGE_KEY_TOKEN);
-        const storedUser = localStorage.getItem(STORAGE_KEY_USER);
+        // Try to refresh access token using httpOnly refresh cookie.
+        // If successful, server returns TokenResponse (access_token + user).
+        const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+        const resp = await fetch(`${base}/auth/refresh`, {
+          method: "POST",
+          credentials: "include",
+        });
 
-        if (storedToken && storedUser) {
-          setToken(storedToken);
-          let parsedUser;
-          try {
-            parsedUser = JSON.parse(storedUser);
-          } catch {
-            localStorage.removeItem(STORAGE_KEY_TOKEN);
-            localStorage.removeItem(STORAGE_KEY_USER);
-            return;
-          }
-
-          // Проверяем актуальность данных пользователя
-          try {
-            const freshUser = await getUserProfile(parsedUser.id);
-            setUser(freshUser);
-            localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(freshUser));
-          } catch (_error) {
-            // Если не удалось обновить, используем сохранённые данные
-            setUser(parsedUser);
+        if (resp.ok) {
+          const data = await resp.json();
+          setAccessToken(data.access_token);
+          setToken(data.access_token);
+          setUser(data.user);
+          // persist user profile for UI across reloads
+          localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(data.user));
+        } else {
+          // If refresh didn't work, fallback to stored user if present
+          const storedUser = localStorage.getItem(STORAGE_KEY_USER);
+          if (storedUser) {
+            try {
+              setUser(JSON.parse(storedUser));
+            } catch {
+              localStorage.removeItem(STORAGE_KEY_USER);
+            }
           }
         }
       } catch (error) {
         console.error("Ошибка инициализации аутентификации:", error);
-        // Очищаем невалидные данные
-        localStorage.removeItem(STORAGE_KEY_TOKEN);
         localStorage.removeItem(STORAGE_KEY_USER);
       } finally {
         setLoading(false);
@@ -130,10 +130,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         const response = await apiLogin(credentials);
 
-        // Сохраняем токен и пользователя
+        // Save access token in memory and user profile in storage
+        setAccessToken(response.access_token);
         setToken(response.access_token);
         setUser(response.user);
-        localStorage.setItem(STORAGE_KEY_TOKEN, response.access_token);
         localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(response.user));
 
         return { success: true };
@@ -171,10 +171,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         const response = await apiRegister(data);
 
-        // Сохраняем токен и пользователя (автоматический вход после регистрации)
+        // Save access token in memory and user profile in storage (auto-login)
+        setAccessToken(response.access_token);
         setToken(response.access_token);
         setUser(response.user);
-        localStorage.setItem(STORAGE_KEY_TOKEN, response.access_token);
         localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(response.user));
 
         return { success: true };
@@ -213,7 +213,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Всегда очищаем локальные данные
       setToken(null);
       setUser(null);
-      localStorage.removeItem(STORAGE_KEY_TOKEN);
+      setAccessToken(null);
       localStorage.removeItem(STORAGE_KEY_USER);
     }
   }, []);

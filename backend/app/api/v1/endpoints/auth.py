@@ -3,101 +3,241 @@ Endpoints для аутентификации
 Регистрация, логин, logout
 """
 
-from fastapi import APIRouter, HTTPException, status, Request
+import json
+import time
+import uuid
 from datetime import datetime, timezone
 from typing import Dict
-from collections import defaultdict
-import uuid
-import time
 
-from app.models.user import UserCreate, UserLogin, TokenResponse, UserProfile, UserStats, GradeEnum, UserRoleEnum
-from app.core.security import get_password_hash, verify_password, create_access_token
+import asyncpg
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
+
+from collections import defaultdict
+
+from app.core.security import (
+    create_access_token,
+    get_password_hash,
+    verify_password,
+    create_refresh_token,
+    verify_refresh_token,
+    revoke_refresh_token,
+)
+from app.core.ratelimit import check_rate_limit
+from app.core.config import settings
+from app.db.session import get_db_connection
+from app.core.otel_utils import db_span
+from app.models.user import (
+    GradeEnum,
+    TokenResponse,
+    UserCreate,
+    UserLogin,
+    UserProfile,
+    UserRoleEnum,
+    UserStats,
+    row_to_user_profile,
+)
 
 router = APIRouter(prefix="/auth", tags=["Аутентификация"])
 
-_login_attempts: Dict[str, list] = defaultdict(list)
-_RATE_LIMIT_WINDOW = 300
-_RATE_LIMIT_MAX = 10
 
-
-def _check_rate_limit(ip: str) -> None:
-    now = time.time()
-    _login_attempts[ip] = [t for t in _login_attempts[ip] if now - t < _RATE_LIMIT_WINDOW]
-    if len(_login_attempts[ip]) >= _RATE_LIMIT_MAX:
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Слишком много попыток")
-    _login_attempts[ip].append(now)
-
-USERS_DB: Dict[str, dict] = {
-    "novice_dev": {
-        "password_hash": get_password_hash("password123"),
-        "profile": UserProfile(
-            id="user_123456",
-            username="novice_dev",
-            email="novice@example.com",
-            role=UserRoleEnum.freelancer,
-            level=1, grade=GradeEnum.novice, xp=0, xp_to_next=100,
-            stats=UserStats(int=10, dex=10, cha=10),
-            badges=[],
-            created_at=datetime(2026, 2, 28),
-            updated_at=datetime(2026, 2, 28)
+@router.post(
+    "/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED
+)
+async def register(
+    user_data: UserCreate, conn: asyncpg.Connection = Depends(get_db_connection)
+):
+    # Проверяем существование пользователя
+    with db_span("db.fetchrow", query="SELECT id FROM users WHERE username = $1 OR email = $2", params=[user_data.username, user_data.email]):
+        existing_user = await conn.fetchrow(
+            "SELECT id FROM users WHERE username = $1 OR email = $2",
+            user_data.username,
+            user_data.email,
         )
-    },
-    "client_user": {
-        "password_hash": get_password_hash("client123"),
-        "profile": UserProfile(
-            id="user_client_001",
-            username="client_user",
-            email="client@example.com",
-            role=UserRoleEnum.client,
-            level=1, grade=GradeEnum.novice, xp=0, xp_to_next=100,
-            stats=UserStats(int=10, dex=10, cha=10),
-            badges=[],
-            created_at=datetime(2026, 2, 28),
-            updated_at=datetime(2026, 2, 28)
+
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Пользователь с таким именем или email уже существует",
         )
-    }
-}
 
-
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserCreate):
-    if user_data.username in USERS_DB:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Пользователь уже существует")
-    
-    for user_info in USERS_DB.values():
-        if user_info["profile"].email == user_data.email:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email уже зарегистрирован")
-    
     user_id = f"user_{uuid.uuid4().hex[:12]}"
-    user_profile = UserProfile(
-        id=user_id, username=user_data.username, email=user_data.email,
-        role=user_data.role, level=1, grade=GradeEnum.novice, xp=0, xp_to_next=100,
-        stats=UserStats(int=10, dex=10, cha=10), badges=[],
-        created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc)
-    )
-    
     password_hash = get_password_hash(user_data.password)
-    USERS_DB[user_data.username] = {"password_hash": password_hash, "profile": user_profile}
+    now = datetime.now(timezone.utc)
+
+    # Вставляем нового пользователя
+    with db_span("db.execute", query="INSERT INTO users (...) VALUES (...)", params=[user_id, user_data.username, user_data.email]):
+        await conn.execute(
+        """
+        INSERT INTO users (
+            id, username, email, password_hash, role, level, grade, xp, xp_to_next,
+            stats_int, stats_dex, stats_cha, badges, bio, skills, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        """,
+        user_id,
+        user_data.username,
+        user_data.email,
+        password_hash,
+        user_data.role.value,
+        1,
+        GradeEnum.novice.value,
+        0,
+        100,
+        10,
+        10,
+        10,
+        "[]",
+        None,
+        "[]",
+        now,
+        now,
+    )
+
+    user_profile = UserProfile(
+        id=user_id,
+        username=user_data.username,
+        email=user_data.email,
+        role=user_data.role,
+        level=1,
+        grade=GradeEnum.novice,
+        xp=0,
+        xp_to_next=100,
+        stats=UserStats(int=10, dex=10, cha=10),
+        badges=[],
+        created_at=now,
+        updated_at=now,
+    )
+
     access_token = create_access_token(data={"sub": user_id})
-    
-    return TokenResponse(access_token=access_token, token_type="bearer", user=user_profile)
+
+    # Create refresh token and set it as httpOnly cookie
+    refresh_token, expires_seconds = create_refresh_token(user_id)
+
+    resp = TokenResponse(
+        access_token=access_token, token_type="bearer", user=user_profile
+    )
+
+    response = JSONResponse(
+        content=json.loads(resp.model_dump_json(by_alias=True)),
+        status_code=status.HTTP_201_CREATED,
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        max_age=expires_seconds,
+        path="/",
+    )
+    return response
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(credentials: UserLogin, request: Request):
-    _check_rate_limit(request.client.host if request.client else "unknown")
-    
-    if credentials.username not in USERS_DB:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверное имя пользователя или пароль")
-    
-    user_info = USERS_DB[credentials.username]
-    if not verify_password(credentials.password, user_info["password_hash"]):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверное имя пользователя или пароль")
-    
-    access_token = create_access_token(data={"sub": user_info["profile"].id})
-    return TokenResponse(access_token=access_token, token_type="bearer", user=user_info["profile"])
+async def login(
+    credentials: UserLogin,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db_connection),
+):
+    # Enforce Redis-backed rate limit for login attempts
+    check_rate_limit(request.client.host if request.client else "unknown", action="login", limit=10, window_seconds=300)
+
+    with db_span("db.fetchrow", query="SELECT * FROM users WHERE username = $1", params=[credentials.username]):
+        user_row = await conn.fetchrow(
+            "SELECT * FROM users WHERE username = $1", credentials.username
+        )
+
+    if not user_row or not verify_password(
+        credentials.password, user_row["password_hash"]
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Неверное имя пользователя или пароль",
+        )
+
+    user_profile = row_to_user_profile(user_row)
+
+    access_token = create_access_token(data={"sub": user_row["id"]})
+
+    # issue refresh token and set as httpOnly cookie
+    refresh_token, expires_seconds = create_refresh_token(user_row["id"])
+
+    resp = TokenResponse(
+        access_token=access_token, token_type="bearer", user=user_profile
+    )
+
+    response = JSONResponse(
+        content=json.loads(resp.model_dump_json(by_alias=True)),
+        status_code=200,
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        max_age=expires_seconds,
+        path="/",
+    )
+    return response
 
 
 @router.post("/logout")
-async def logout():
+async def logout(request: Request, response: Response):
+    """Logout: revoke refresh token (if present) and clear cookie."""
+    refresh = request.cookies.get("refresh_token")
+    if refresh:
+        revoke_refresh_token(refresh)
+    # clear cookie
+    response.delete_cookie("refresh_token", path="/")
     return {"message": "Успешный выход"}
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_token(
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db_connection),
+):
+    """Rotate refresh token and return a new access token.
+
+    Cookie `refresh_token` is required. The endpoint will rotate the refresh token
+    (revoke the previous one and issue a new one) and set it as an httpOnly cookie.
+    """
+    refresh = request.cookies.get("refresh_token")
+    if not refresh:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No refresh token")
+
+    user_id = verify_refresh_token(refresh)
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
+
+    # rotate
+    revoke_refresh_token(refresh)
+    new_refresh, expires_seconds = create_refresh_token(user_id)
+
+    # load user profile
+    with db_span("db.fetchrow", query="SELECT * FROM users WHERE id = $1", params=[user_id]):
+        user_row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+    if not user_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    user_profile = row_to_user_profile(user_row)
+
+    access_token = create_access_token(data={"sub": user_id})
+
+    resp = TokenResponse(access_token=access_token, token_type="bearer", user=user_profile)
+
+    response = JSONResponse(
+        content=json.loads(resp.model_dump_json(by_alias=True)),
+        status_code=200,
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=new_refresh,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        max_age=expires_seconds,
+        path="/",
+    )
+    return response
