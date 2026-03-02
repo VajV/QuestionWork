@@ -6,7 +6,7 @@ interface ProgressBarProps {
   value: number;
   max: number;
   label?: string;
-  color?: 'purple' | 'green' | 'blue' | 'red';
+  color?: 'purple' | 'green' | 'blue' | 'red' | 'emerald' | 'amber';
   showPercent?: boolean;
   className?: string;
 }
@@ -25,7 +25,7 @@ export default function ProgressBar({
     purple: 'from-purple-600 to-purple-400 shadow-purple-500/30',
     green: 'from-green-600 to-green-400 shadow-green-500/30',
     blue: 'from-blue-600 to-blue-400 shadow-blue-500/30',
-    red: 'from-red-600 to-red-400 shadow-red-500/30',
+    red: 'from-red-600 to-red-400 shadow-red-500/30', emerald: 'from-emerald-600 to-emerald-400 shadow-emerald-500/30', amber: 'from-amber-600 to-amber-400 shadow-amber-500/30',
   };
 
   return (
