@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -21,7 +23,7 @@ body {
   overflow-x: hidden;
   background: var(--background);
   color: var(--foreground);
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: 'Inter', sans-serif;
 }
 
 /* RPG Scrollbar */
@@ -50,4 +52,35 @@ body {
 
 .glow-text {
   text-shadow: 0 0 10px var(--accent-glow);
+}
+
+.glass-card {
+  background: rgba(17, 17, 34, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+}
+
+@supports not (backdrop-filter: blur(12px)) {
+  .glass-card {
+    background: rgba(17, 17, 34, 0.95);
+  }
+}
+
+.stat-glow-blue {
+  box-shadow: 0 0 20px rgba(96, 165, 250, 0.35), inset 0 0 20px rgba(96, 165, 250, 0.05);
+}
+
+.stat-glow-emerald {
+  box-shadow: 0 0 20px rgba(52, 211, 153, 0.35), inset 0 0 20px rgba(52, 211, 153, 0.05);
+}
+
+.stat-glow-amber {
+  box-shadow: 0 0 20px rgba(251, 191, 36, 0.35), inset 0 0 20px rgba(251, 191, 36, 0.05);
+}
+
+.neon-border-purple {
+  border-color: rgba(139, 92, 246, 0.5);
+  box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.3), 0 0 20px rgba(139, 92, 246, 0.2);
 }
