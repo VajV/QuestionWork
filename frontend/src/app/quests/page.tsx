@@ -16,8 +16,6 @@ import {
   getQuests,
   applyToQuest,
   Quest,
-  UserGrade,
-  QuestStatus,
   QuestApplicationCreate,
 } from "@/lib/api";
 import Header from "@/components/layout/Header";
@@ -110,7 +108,7 @@ export default function QuestsPage() {
     if (!selectedQuest) return;
 
     await applyToQuest(selectedQuest.id, data);
-    setAppliedQuests(new Set([...appliedQuests, selectedQuest.id]));
+    setAppliedQuests(new Set([...Array.from(appliedQuests), selectedQuest.id]));
     setShowApplyModal(false);
     setSelectedQuest(null);
 

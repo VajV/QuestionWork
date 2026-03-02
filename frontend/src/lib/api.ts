@@ -200,7 +200,7 @@ export function getAuthToken(): string | null {
 async function fetchApi<T>(
   endpoint: string,
   options?: RequestInit,
-  requireAuth: boolean = false,
+  _requireAuth: boolean = false,
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
 
@@ -258,7 +258,7 @@ async function fetchApi<T>(
           if (retryResp.status === 204) return {} as T;
           return await retryResp.json();
         }
-      } catch (err) {
+      } catch (_err) {
         // fallthrough to clean-up below
       }
 

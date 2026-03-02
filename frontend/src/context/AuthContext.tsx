@@ -52,7 +52,7 @@ interface AuthContextType {
 // Константы
 // ============================================
 
-const STORAGE_KEY_TOKEN = "questionwork_token";
+// const STORAGE_KEY_TOKEN = "questionwork_token";
 const STORAGE_KEY_USER = "questionwork_user";
 
 // ============================================
