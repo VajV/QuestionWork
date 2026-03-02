@@ -19,6 +19,7 @@ import Button from "@/components/ui/Button";
 import { getUserProfile, getMyBadges, UserProfile } from "@/lib/api";
 import type { UserBadgeEarned } from "@/lib/api";
 import BadgeGrid from "@/components/rpg/BadgeGrid";
+import { User, Briefcase, Star, Award } from 'lucide-react';
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -65,13 +66,13 @@ export default function ProfilePage() {
         <Header />
         <div className="container mx-auto px-4 py-8">
           <div className="max-w-4xl mx-auto">
-            <Card className="p-6 mb-6">
+            <div className="glass-card p-6 mb-6">
               <div className="animate-pulse space-y-4">
-                <div className="h-32 bg-gray-700 rounded-full w-32 mx-auto" />
-                <div className="h-8 bg-gray-700 rounded w-48 mx-auto" />
-                <div className="h-4 bg-gray-700 rounded w-32 mx-auto" />
+                <div className="h-32 bg-gray-700/50 rounded-full w-32 mx-auto" />
+                <div className="h-8 bg-gray-700/50 rounded w-48 mx-auto" />
+                <div className="h-4 bg-gray-700/50 rounded w-32 mx-auto" />
               </div>
-            </Card>
+            </div>
           </div>
         </div>
       </main>
@@ -85,16 +86,16 @@ export default function ProfilePage() {
         <Header />
         <div className="container mx-auto px-4 py-8">
           <div className="max-w-4xl mx-auto">
-            <Card className="p-6 border-red-500/50">
+            <div className="glass-card p-6 !border-red-500/50">
               <div className="text-center">
-                <span className="text-4xl mb-2 block">⚠️</span>
+                <span className="text-4xl mb-2 block" aria-hidden="true">⚠️</span>
                 <h3 className="text-xl font-bold text-red-400 mb-2">Ошибка загрузки профиля</h3>
                 <p className="text-gray-400 mb-4">{error}</p>
                 <Button onClick={loadProfile} variant="secondary">
                   🔄 Повторить
                 </Button>
               </div>
-            </Card>
+            </div>
           </div>
         </div>
       </main>
@@ -125,11 +126,11 @@ export default function ProfilePage() {
           </h1>
 
           {/* Основная карточка профиля */}
-          <Card className="p-6 mb-6">
+          <div className="glass-card p-6 mb-6">
             <div className="flex flex-col md:flex-row gap-6 items-center">
               {/* Аватар */}
               <div className="relative">
-                <div className="w-32 h-32 rounded-full bg-gradient-to-br from-purple-500 to-purple-700 flex items-center justify-center text-4xl font-bold glow">
+                <div className="w-32 h-32 rounded-full bg-gradient-to-br from-purple-500 via-violet-600 to-purple-900 flex items-center justify-center text-4xl font-bold ring-4 ring-purple-500/40 shadow-[0_0_40px_rgba(139,92,246,0.5)]">
                   {profile.username[0].toUpperCase()}
                 </div>
                 <div className="absolute -bottom-2 -right-2">
@@ -144,12 +145,13 @@ export default function ProfilePage() {
                 
                 {/* Роль */}
                 <div className="mb-4">
-                  <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
+                  <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium ${
                     profile.role === 'client'
-                      ? 'bg-blue-500/20 text-blue-300 border border-blue-500/50'
-                      : 'bg-green-500/20 text-green-300 border border-green-500/50'
+                      ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30 shadow-[0_0_8px_rgba(59,130,246,0.4)]'
+                      : 'bg-green-500/20 text-green-300 border border-green-500/30 shadow-[0_0_8px_rgba(34,197,94,0.4)]'
                   }`}>
-                    {profile.role === 'client' ? '💼 Клиент' : '👨‍💻 Фрилансер'}
+                    {profile.role === 'client' ? <Briefcase size={14} aria-hidden="true" focusable="false" /> : <User size={14} aria-hidden="true" focusable="false" />}
+                    {profile.role === 'client' ? 'Клиент' : 'Фрилансер'}
                   </span>
                 </div>
                 
@@ -159,12 +161,12 @@ export default function ProfilePage() {
                     <span className="text-purple-300">Experience</span>
                     <span className="text-purple-300">{profile.xp} / {profile.xp_to_next} XP</span>
                   </div>
-                  <div className="w-full bg-gray-700 rounded-full h-4 overflow-hidden">
+                  <div className="w-full bg-white/5 backdrop-blur-sm border border-white/10 rounded-full h-4 relative overflow-hidden">
                     <motion.div
                       initial={{ width: 0 }}
                       animate={{ width: `${xpPercent}%` }}
                       transition={{ duration: 1, delay: 0.3 }}
-                      className="h-full bg-gradient-to-r from-purple-600 to-purple-400"
+                      className="h-full bg-gradient-to-r from-violet-600 via-purple-500 to-fuchsia-400 shadow-[0_0_12px_rgba(139,92,246,0.7)]"
                     />
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
@@ -178,18 +180,18 @@ export default function ProfilePage() {
                 </div>
               </div>
             </div>
-          </Card>
+          </div>
 
           {/* Статы */}
           <StatsPanel stats={profile.stats} />
 
           {/* Бейджи */}
-          <Card className="p-6 mt-6">
+          <div className="glass-card p-6 mt-6">
             <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <span>🏆</span> Достижения
+              <Award className="text-yellow-400" size={24} aria-hidden="true" focusable="false" /> Достижения
             </h3>
             <BadgeGrid badges={earnedBadges} />
-          </Card>
+          </div>
 
           {/* Навигация */}
           <div className="flex gap-4 mt-6">
