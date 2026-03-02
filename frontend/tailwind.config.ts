@@ -12,6 +12,15 @@ const config: Config = {
         background: "var(--background)",
         foreground: "var(--foreground)",
       },
+      animation: {
+        "neon-pulse": "neon-pulse 2s ease-in-out infinite",
+      },
+      keyframes: {
+        "neon-pulse": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.7" },
+        },
+      },
     },
   },
   plugins: [],
