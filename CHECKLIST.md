@@ -90,6 +90,104 @@ Invoke-RestMethod -Uri "http://localhost:8000/api/v1/quests/?page=1"
 
 ---
 
+## 🔥 SMOKE / REGRESSION BASELINE (Week 1)
+
+Цель: быстрый smoke-прогон за 10-15 минут с понятным PASS/FAIL.
+
+### 0) Подготовка
+- [ ] Docker Desktop запущен
+- [ ] Backend поднят: `cd backend; .venv\Scripts\activate; uvicorn app.main:app --reload --host 127.0.0.1 --port 8000`
+- [ ] Frontend поднят: `cd frontend; npm run dev`
+- [ ] БД мигрирована: `cd backend; alembic upgrade head`
+
+### 1) Docker smoke
+- [ ] Контейнеры Up: `docker compose -f docker-compose.dev.yml ps`
+- [ ] PostgreSQL healthcheck = `healthy`
+- [ ] Redis отвечает: `docker exec questionwork-redis redis-cli ping` -> `PONG`
+
+### 2) Backend smoke
+- [ ] `GET /health` -> `200` и `{"status":"ok"}`
+- [ ] `GET /docs` -> `200`
+- [ ] `POST /api/v1/auth/login` (demo users) -> `200` + `access_token`
+- [ ] `GET /api/v1/quests/?page=1&page_size=10` -> `200`
+- [ ] Негативный тест: `GET /api/v1/quests/nonexistent_id` -> `404`
+
+### 3) Frontend smoke
+- [ ] Открываются страницы: `/`, `/auth/login`, `/auth/register`, `/quests`, `/marketplace`, `/profile`
+- [ ] В DevTools нет критичных runtime ошибок (Uncaught/React hydration)
+- [ ] Запросы уходят на `http://localhost:8000/api/v1`
+
+### 4) Regression scripts
+- [ ] `./scripts/check-status.ps1` -> понятный вывод `✅/❌`, корректный код возврата
+- [ ] `./scripts/test-full-flow.ps1` -> проходит полный flow, корректный код возврата
+- [ ] Единый прогон: `./scripts/smoke-baseline.ps1` (или быстрый режим `-SkipFlow`)
+
+### 5) Smoke PASS criteria
+Smoke считается успешным, если одновременно:
+- [ ] Docker сервисы healthy
+- [ ] Backend auth/quests/health зелёные
+- [ ] Frontend страницы доступны без критичных console errors
+- [ ] Оба скрипта regression завершаются успешно
+
+---
+
+## 🛡️ BACKEND HARDENING (Week 2)
+
+Цель: безопасный, валидированный API без неожиданных 500, с правильной авторизацией.
+
+### 1) CORS
+
+- [x] `PATCH` добавлен в `allow_methods`
+- [x] `Accept`, `X-Request-ID` добавлены в `allow_headers`
+
+### 2) Input Validation (Pydantic)
+
+- [x] `QuestCreate.budget`: `ge=100, le=1_000_000`
+- [x] `QuestCreate.currency`: `Literal["USD", "EUR", "RUB"]` (вместо свободной строки)
+- [x] `QuestCreate.skills`: `max 20 items, max 50 chars each` (field_validator)
+- [x] `QuestUpdate.budget`: `le=1_000_000`
+- [x] `QuestApplicationCreate.cover_letter`: `min_length=10`
+- [x] `QuestApplicationCreate.proposed_price`: `ge=0`
+- [x] `UserLogin.username / password`: `max_length=50/128` (anti-DoS)
+
+### 3) Auth & Role Guards
+
+- [x] `GET /api/v1/users/` требует Bearer токен → 401 без токена
+- [x] `GET /api/v1/users/` лимит: `limit=20` по умолчанию, `max=100`
+- [x] `POST /quests/` — роль `client` обязательна → 403 для `freelancer`
+- [x] `POST /auth/register` — дубль → `409 Conflict` (было 400)
+
+### 4) Tests
+
+- [x] `backend/tests/test_endpoints.py` — 17 HTTP-тестов (422/401/403)
+- [x] `pytest.ini` — coverage scope расширен до `--cov=app` (53% общий)
+- [x] **24 passed** (7 unit + 17 endpoint)
+
+### 5) Week 2 Acceptance Criteria
+
+```powershell
+# Все тесты
+cd backend; pytest --no-cov -q          # 24 passed
+
+# Проверка CORS PATCH
+curl -X OPTIONS http://localhost:8000/api/v1/quests/ `
+     -H "Origin: http://localhost:3000" `
+     -H "Access-Control-Request-Method: PATCH" -v
+
+# Валидация — should return 422
+curl -s http://localhost:8000/api/v1/quests/ -X POST `
+     -H "Authorization: Bearer test" `
+     -d '{"title":"t","description":"x","budget":50,"currency":"JPY"}' `
+     -H "Content-Type: application/json"
+
+# Auth guard — should return 401
+curl -s http://localhost:8000/api/v1/users/
+
+# Role guard — login as novice_dev (freelancer) and try to create quest -> 403
+```
+
+
+
 ## 🔐 ТЕСТОВЫЕ АККАУНТЫ (встроены в систему)
 
 | Роль       | Username      | Password    | Описание              |
@@ -315,4 +413,4 @@ QuestionWork/
 
 ---
 
-*Последнее обновление: 2026-03-01*
+*Последнее обновление: 2026-03-02 (Week 2 Backend Hardening)*

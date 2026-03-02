@@ -56,7 +56,7 @@ except Exception:
 load_dotenv()
 
 from app.api.v1.api import api_router
-from app.db.session import close_db_pool, init_db_pool
+from app.db.session import close_db_pool, engine, init_db_pool
 
 
 # Initialize structured logging
@@ -78,6 +78,8 @@ async def lifespan(app: FastAPI):
     yield
     # Закрытие пула при остановке
     await close_db_pool()
+    # Dispose SQLAlchemy engine for clean shutdown
+    await engine.dispose()
 
 
 # Создаём FastAPI приложение
@@ -154,8 +156,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[os.getenv("FRONTEND_URL", "http://localhost:3000")],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
 )
 
 # Подключаем роутеры

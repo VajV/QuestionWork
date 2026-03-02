@@ -6,23 +6,38 @@ Write-Host "  QuestionWork - Complete Quest Flow Test" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 
 $API_URL = "http://localhost:8000/api/v1"
+$script:HasFailed = $false
+
+function Write-StepResult {
+    param(
+        [bool]$Ok,
+        [string]$Message
+    )
+
+    if ($Ok) {
+        Write-Host "  ✅ PASS  $Message" -ForegroundColor Green
+    } else {
+        $script:HasFailed = $true
+        Write-Host "  ❌ FAIL  $Message" -ForegroundColor Red
+    }
+}
 
 # ============================================
 # Step 1: Login as CLIENT (quest creator)
 # ============================================
 Write-Host "`n[1/6] Login as CLIENT (quest creator)..." -ForegroundColor Yellow
 
-$clientLogin = '{"username":"novice_dev","password":"password123"}'
+$clientLogin = '{"username":"client_user","password":"client123"}'
 
 try {
     $clientResponse = Invoke-RestMethod -Uri "$API_URL/auth/login" -Method Post -ContentType "application/json" -Body $clientLogin
-    Write-Host "  SUCCESS: Logged in as $($clientResponse.user.username)" -ForegroundColor Green
+    Write-StepResult $true "Logged in as $($clientResponse.user.username)"
     Write-Host "  User ID: $($clientResponse.user.id)" -ForegroundColor Gray
     $clientToken = $clientResponse.access_token
     $clientId = $clientResponse.user.id
     $clientHeaders = @{"Authorization"="Bearer $clientToken";"Content-Type"="application/json"}
 } catch {
-    Write-Host "  FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    Write-StepResult $false "CLIENT login failed: $($_.Exception.Message)"
     exit 1
 }
 
@@ -42,13 +57,13 @@ $questBody = '{
 
 try {
     $quest = Invoke-RestMethod -Uri "$API_URL/quests/" -Method Post -Headers $clientHeaders -Body $questBody
-    Write-Host "  SUCCESS: Quest created" -ForegroundColor Green
+    Write-StepResult $true "Quest created"
     Write-Host "  Quest ID: $($quest.id)" -ForegroundColor Gray
     Write-Host "  Budget: $($quest.budget) RUB" -ForegroundColor Gray
     Write-Host "  XP Reward: $($quest.xp_reward)" -ForegroundColor Gray
     $questId = $quest.id
 } catch {
-    Write-Host "  FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    Write-StepResult $false "Quest creation failed: $($_.Exception.Message)"
     exit 1
 }
 
@@ -69,13 +84,13 @@ $registerBody = "{
 
 try {
     $registerResponse = Invoke-RestMethod -Uri "$API_URL/auth/register" -Method Post -ContentType "application/json" -Body $registerBody
-    Write-Host "  SUCCESS: Registered as $($registerResponse.user.username)" -ForegroundColor Green
+    Write-StepResult $true "Registered as $($registerResponse.user.username)"
     Write-Host "  User ID: $($registerResponse.user.id)" -ForegroundColor Gray
     $freelancerToken = $registerResponse.access_token
     $freelancerId = $registerResponse.user.id
     $freelancerHeaders = @{"Authorization"="Bearer $freelancerToken";"Content-Type"="application/json"}
 } catch {
-    Write-Host "  FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    Write-StepResult $false "Freelancer registration failed: $($_.Exception.Message)"
     if ($_.ErrorDetails.Message) {
         $errorData = $_.ErrorDetails.Message | ConvertFrom-Json
         Write-Host "  Detail: $($errorData.detail)" -ForegroundColor Red
@@ -95,10 +110,10 @@ $applyBody = '{
 
 try {
     $applyResponse = Invoke-RestMethod -Uri "$API_URL/quests/$questId/apply" -Method Post -Headers $freelancerHeaders -Body $applyBody
-    Write-Host "  SUCCESS: Application submitted" -ForegroundColor Green
+    Write-StepResult $true "Application submitted"
     Write-Host "  Application ID: $($applyResponse.application.id)" -ForegroundColor Gray
 } catch {
-    Write-Host "  FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    Write-StepResult $false "Application failed: $($_.Exception.Message)"
     if ($_.ErrorDetails.Message) {
         $errorData = $_.ErrorDetails.Message | ConvertFrom-Json
         Write-Host "  Detail: $($errorData.detail)" -ForegroundColor Red
@@ -113,10 +128,10 @@ Write-Host "`n[5/6] CLIENT assigns freelancer..." -ForegroundColor Yellow
 
 try {
     $assignResponse = Invoke-RestMethod -Uri "$API_URL/quests/$questId/assign?freelancer_id=$freelancerId" -Method Post -Headers $clientHeaders
-    Write-Host "  SUCCESS: Freelancer assigned" -ForegroundColor Green
+    Write-StepResult $true "Freelancer assigned"
     Write-Host "  Quest Status: $($assignResponse.quest.status)" -ForegroundColor Gray
 } catch {
-    Write-Host "  FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    Write-StepResult $false "Assign failed: $($_.Exception.Message)"
     if ($_.ErrorDetails.Message) {
         $errorData = $_.ErrorDetails.Message | ConvertFrom-Json
         Write-Host "  Detail: $($errorData.detail)" -ForegroundColor Red
@@ -131,11 +146,11 @@ Write-Host "`n[6/7] FREELANCER completes quest..." -ForegroundColor Yellow
 
 try {
     $completeResponse = Invoke-RestMethod -Uri "$API_URL/quests/$questId/complete" -Method Post -Headers $freelancerHeaders
-    Write-Host "  SUCCESS: Quest completed" -ForegroundColor Green
+    Write-StepResult $true "Quest completed"
     Write-Host "  Quest Status: $($completeResponse.quest.status)" -ForegroundColor Gray
     Write-Host "  XP Earned: $($completeResponse.xp_earned)" -ForegroundColor Gray
 } catch {
-    Write-Host "  FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    Write-StepResult $false "Completion failed: $($_.Exception.Message)"
     if ($_.ErrorDetails.Message) {
         $errorData = $_.ErrorDetails.Message | ConvertFrom-Json
         Write-Host "  Detail: $($errorData.detail)" -ForegroundColor Red
@@ -150,12 +165,12 @@ Write-Host "`n[7/7] CLIENT confirms completion..." -ForegroundColor Yellow
 
 try {
     $confirmResponse = Invoke-RestMethod -Uri "$API_URL/quests/$questId/confirm" -Method Post -Headers $clientHeaders
-    Write-Host "  SUCCESS: Quest CONFIRMED!" -ForegroundColor Green
+    Write-StepResult $true "Quest confirmed"
     Write-Host "  XP Reward: $($confirmResponse.xp_reward)" -ForegroundColor Gray
     Write-Host "  Money Reward: $($confirmResponse.money_reward) RUB" -ForegroundColor Gray
     Write-Host "  Message: $($confirmResponse.message)" -ForegroundColor Green
 } catch {
-    Write-Host "  FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    Write-StepResult $false "Confirmation failed: $($_.Exception.Message)"
     if ($_.ErrorDetails.Message) {
         $errorData = $_.ErrorDetails.Message | ConvertFrom-Json
         Write-Host "  Detail: $($errorData.detail)" -ForegroundColor Red
@@ -167,7 +182,7 @@ try {
 # Summary
 # ============================================
 Write-Host "`n============================================" -ForegroundColor Cyan
-Write-Host "  ALL TESTS PASSED!" -ForegroundColor Green
+Write-Host "  ✅ ALL TESTS PASSED!" -ForegroundColor Green
 Write-Host "============================================" -ForegroundColor Cyan
 
 Write-Host "`nQuest Flow Completed:" -ForegroundColor Yellow
@@ -179,3 +194,9 @@ Write-Host "  4. Status: CONFIRMED" -ForegroundColor White
 Write-Host "`nOpen in browser:" -ForegroundColor Cyan
 Write-Host "  http://localhost:3000/quests/$questId" -ForegroundColor White
 Write-Host "`n============================================" -ForegroundColor Cyan
+
+if ($script:HasFailed) {
+    exit 1
+}
+
+exit 0

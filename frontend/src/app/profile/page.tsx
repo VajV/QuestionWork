@@ -7,7 +7,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
@@ -16,40 +16,49 @@ import LevelBadge from "@/components/rpg/LevelBadge";
 import StatsPanel from "@/components/rpg/StatsPanel";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-import { getUserProfile, UserProfile } from "@/lib/api";
+import { getUserProfile, getMyBadges, UserProfile } from "@/lib/api";
+import type { UserBadgeEarned } from "@/lib/api";
+import BadgeGrid from "@/components/rpg/BadgeGrid";
 
 export default function ProfilePage() {
   const router = useRouter();
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [earnedBadges, setEarnedBadges] = useState<UserBadgeEarned[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Редирект если не авторизован
+  // Redirect if not authenticated
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
       router.push("/auth/login");
     }
   }, [isAuthenticated, authLoading, router]);
 
-  // Загрузка профиля
-  useEffect(() => {
-    async function loadProfile() {
-      if (!user?.id) return;
-
-      try {
-        const data = await getUserProfile(user.id);
-        setProfile(data);
-      } catch (error) {
-        console.error("Ошибка загрузки профиля:", error);
-      } finally {
-        setLoading(false);
-      }
+  // Load profile
+  const loadProfile = useCallback(async () => {
+    if (!user?.id) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const [data, badgeData] = await Promise.all([
+        getUserProfile(user.id),
+        getMyBadges(),
+      ]);
+      setProfile(data);
+      setEarnedBadges(badgeData.badges);
+    } catch (err) {
+      console.error("Ошибка загрузки профиля:", err);
+      setError("Не удалось загрузить профиль. Попробуйте позже.");
+    } finally {
+      setLoading(false);
     }
-
-    loadProfile();
   }, [user?.id]);
 
-  // Показываем лоадер во время загрузки
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
+
   if (authLoading || loading) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900/20 to-gray-900">
@@ -69,7 +78,30 @@ export default function ProfilePage() {
     );
   }
 
-  // Если не авторизован — не рендерим (будет редирект)
+  // Error loading profile — show retry card instead of blank page
+  if (error) {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900/20 to-gray-900">
+        <Header />
+        <div className="container mx-auto px-4 py-8">
+          <div className="max-w-4xl mx-auto">
+            <Card className="p-6 border-red-500/50">
+              <div className="text-center">
+                <span className="text-4xl mb-2 block">⚠️</span>
+                <h3 className="text-xl font-bold text-red-400 mb-2">Ошибка загрузки профиля</h3>
+                <p className="text-gray-400 mb-4">{error}</p>
+                <Button onClick={loadProfile} variant="secondary">
+                  🔄 Повторить
+                </Button>
+              </div>
+            </Card>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // If not authenticated, redirect is in progress
   if (!isAuthenticated || !profile) {
     return null;
   }
@@ -152,24 +184,12 @@ export default function ProfilePage() {
           <StatsPanel stats={profile.stats} />
 
           {/* Бейджи */}
-          {profile.badges.length > 0 && (
-            <Card className="p-6 mt-6">
-              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                <span>🏆</span> Достижения
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {profile.badges.map((badge) => (
-                  <div key={badge.id} className="flex items-center gap-3 p-3 bg-gray-800/50 rounded-lg">
-                    <span className="text-3xl">{badge.icon}</span>
-                    <div>
-                      <div className="font-medium text-white">{badge.name}</div>
-                      <div className="text-sm text-gray-400">{badge.description}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
+          <Card className="p-6 mt-6">
+            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+              <span>🏆</span> Достижения
+            </h3>
+            <BadgeGrid badges={earnedBadges} />
+          </Card>
 
           {/* Навигация */}
           <div className="flex gap-4 mt-6">

@@ -19,6 +19,15 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  // Detect ?expired=1 in URL — avoids useSearchParams Suspense requirement
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      setSessionExpired(params.get("expired") === "1");
+    }
+  }, []);
 
   // Редирект если уже авторизован
   useEffect(() => {
@@ -64,6 +73,22 @@ export default function LoginPage() {
           <h1 className="text-2xl font-bold mt-4">Вход в систему</h1>
           <p className="text-gray-400 mt-2">Добро пожаловать обратно!</p>
         </div>
+
+        {sessionExpired && !error && (
+          <div className="mb-6 p-4 bg-amber-900/30 border border-amber-500/50 rounded-lg text-amber-200 text-sm flex items-start gap-2">
+            <span>⏰</span>
+            <span className="flex-1">
+              Сессия истекла — войдите ещё раз.
+            </span>
+            <button
+              className="opacity-60 hover:opacity-100 transition-opacity"
+              onClick={() => setSessionExpired(false)}
+              aria-label="Закрыть"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {error && (
           <div className="mb-6 p-4 bg-red-900/30 border border-red-500/50 rounded-lg text-red-200 text-sm">

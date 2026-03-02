@@ -39,7 +39,32 @@ class Settings(BaseSettings):
     
     # CORS
     FRONTEND_URL: str = "http://localhost:3000"
-    
+
+    # Economy
+    PLATFORM_FEE_PERCENT: float = 10.0          # % taken by platform on quest payout
+    MIN_WITHDRAWAL_AMOUNT: float = 10.0          # minimum withdrawal per request
+    PLATFORM_USER_ID: str = "platform"           # virtual wallet owner for collected fees
+    WITHDRAWAL_AUTO_APPROVE_LIMIT: float = 50.0  # amounts <= this are auto-approved by the processor script
+
+    # Operations / Admin
+    NOTIFICATION_RETENTION_DAYS: int = 30        # prune read notifications older than N days
+    ADMIN_DEFAULT_PASSWORD: Optional[str] = None # if set, seeds a default admin user on migration
+
+    # Admin security hardening
+    # Comma-separated list of allowed IPv4/IPv6 addresses for admin endpoints.
+    # Empty string = allow all (development default). In production set to your ops IPs.
+    ADMIN_IP_ALLOWLIST: str = ""
+    # When True every admin HTTP request must include a valid X-TOTP-Token header.
+    ADMIN_TOTP_REQUIRED: bool = False
+
+    # Alerting
+    # Slack incoming-webhook URL. When set, the cron scripts post summaries/errors.
+    SLACK_WEBHOOK_URL: Optional[str] = None
+
+    # Backup
+    BACKUP_DIR: str = "/var/backups/questionwork"  # override in .env
+    BACKUP_RETENTION_DAYS: int = 7
+
     # OpenRouter API
     OPENROUTER_API_KEY: Optional[str] = None
     OPENROUTER_MODEL: str = "qwen/qwen-2.5-coder-32b-instruct"

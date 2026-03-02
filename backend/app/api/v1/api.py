@@ -5,7 +5,7 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, users, quests
+from app.api.v1.endpoints import auth, users, quests, wallet, notifications, badges, admin
 
 # Создаём главный роутер для версии API v1
 api_router = APIRouter()
@@ -14,3 +14,7 @@ api_router = APIRouter()
 api_router.include_router(auth.router)
 api_router.include_router(users.router)
 api_router.include_router(quests.router)
+api_router.include_router(wallet.router)
+api_router.include_router(notifications.router)
+api_router.include_router(badges.router)
+api_router.include_router(admin.router)

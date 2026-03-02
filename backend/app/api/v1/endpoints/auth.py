@@ -57,7 +57,7 @@ async def register(
 
     if existing_user:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_409_CONFLICT,
             detail="Пользователь с таким именем или email уже существует",
         )
 
@@ -71,8 +71,8 @@ async def register(
         """
         INSERT INTO users (
             id, username, email, password_hash, role, level, grade, xp, xp_to_next,
-            stats_int, stats_dex, stats_cha, badges, bio, skills, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            stats_int, stats_dex, stats_cha, stat_points, badges, bio, skills, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         """,
         user_id,
         user_data.username,
@@ -86,6 +86,7 @@ async def register(
         10,
         10,
         10,
+        0,
         "[]",
         None,
         "[]",
@@ -153,6 +154,12 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Неверное имя пользователя или пароль",
+        )
+
+    if user_row["id"] == settings.PLATFORM_USER_ID:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account cannot log in",
         )
 
     user_profile = row_to_user_profile(user_row)

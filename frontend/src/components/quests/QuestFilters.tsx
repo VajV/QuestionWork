@@ -8,20 +8,13 @@
 
 import { useState } from "react";
 import { UserGrade, QuestStatus } from "@/lib/api";
+import type { QuestFilterState } from "@/types";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 
 interface QuestFiltersProps {
   onFilterChange: (filters: QuestFilterState) => void;
   initialFilters?: QuestFilterState;
-}
-
-interface QuestFilterState {
-  grade?: UserGrade;
-  status?: QuestStatus;
-  skill?: string;
-  minBudget?: number;
-  maxBudget?: number;
 }
 
 const GRADE_OPTIONS: { value: UserGrade; label: string; icon: string }[] = [

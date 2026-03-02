@@ -2,6 +2,10 @@
 # Comprehensive health check for all project components
 # Compatible with PowerShell 5+ and ASCII-safe
 
+param(
+    [switch]$SkipDocker
+)
+
 $ErrorActionPreference = "SilentlyContinue"
 
 $ROOT         = Split-Path -Parent $PSScriptRoot
@@ -10,6 +14,7 @@ $FRONTEND_DIR = Join-Path $ROOT "frontend"
 
 $totalChecks  = 0
 $passedChecks = 0
+$hardFailedChecks = 0
 
 function Write-Check {
     param(
@@ -21,11 +26,12 @@ function Write-Check {
     $script:totalChecks++
     if ($Ok) {
         $script:passedChecks++
-        Write-Host "  [OK]   $Label" -ForegroundColor Green -NoNewline
+        Write-Host "  ✅ PASS  $Label" -ForegroundColor Green -NoNewline
     } elseif ($IsWarn) {
-        Write-Host "  [WARN] $Label" -ForegroundColor Yellow -NoNewline
+        Write-Host "  ⚠️ WARN  $Label" -ForegroundColor Yellow -NoNewline
     } else {
-        Write-Host "  [FAIL] $Label" -ForegroundColor Red -NoNewline
+        $script:hardFailedChecks++
+        Write-Host "  ❌ FAIL  $Label" -ForegroundColor Red -NoNewline
     }
     if ($Detail) {
         Write-Host "  -- $Detail" -ForegroundColor Gray
@@ -159,7 +165,7 @@ if ($backendPort) {
         $regOk = ($regResp.StatusCode -eq 201)
     } catch {
         $code  = $_.Exception.Response.StatusCode.Value__
-        $regOk = ($code -eq 400 -or $code -eq 201)
+        $regOk = ($code -eq 400 -or $code -eq 409 -or $code -eq 201)
     }
     Write-Check "POST /api/v1/auth/register reachable" $regOk
 
@@ -192,9 +198,30 @@ if ($backendPort) {
     }
     Write-Check "GET /api/v1/quests/" $questsOk "$questCount quests in memory"
 
-    # Users list
-    $usersResp = Invoke-ApiGet "http://localhost:8000/api/v1/users/"
-    Write-Check "GET /api/v1/users/"  ($null -ne $usersResp -and $usersResp.StatusCode -eq 200)
+    # Users list (requires auth since Week 2 hardening)
+    $usersOk = $false
+    if ($demoToken) {
+        try {
+            $authHeaders2 = @{ Authorization = "Bearer $demoToken" }
+            $usersAuth = Invoke-WebRequest -Uri "http://localhost:8000/api/v1/users/" `
+                             -Headers $authHeaders2 -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+            $usersOk = ($usersAuth.StatusCode -eq 200)
+        } catch {
+            $usersOk = $false
+        }
+        Write-Check "GET /api/v1/users/ (auth)" $usersOk
+    } else {
+        # No demo token -- just confirm endpoint responds (401 is correct behaviour)
+        $usersNoAuth = $null
+        try {
+            Invoke-WebRequest -Uri "http://localhost:8000/api/v1/users/" `
+                -UseBasicParsing -TimeoutSec 4 -ErrorAction Stop | Out-Null
+        } catch {
+            $usersNoAuth = $_.Exception.Response.StatusCode.Value__
+        }
+        $usersOk = ($usersNoAuth -eq 401)
+        Write-Check "GET /api/v1/users/ reachable (401 expected)" $usersOk
+    }
 
     # Authenticated request
     if ($demoToken) {
@@ -250,6 +277,10 @@ if ($frontendPort) {
 
 Write-Section "6. Docker / Infrastructure"
 
+if ($SkipDocker) {
+    Write-Check "Docker checks skipped" $true "SkipDocker flag enabled" -IsWarn:$true
+} else {
+
 $dockerRunning = $false
 try {
     docker info 2>&1 | Out-Null
@@ -262,15 +293,31 @@ Write-Check "Docker Desktop running" $dockerRunning
 if ($dockerRunning) {
     $containers = docker ps --format "{{.Names}}" 2>&1
 
-    $redisUp    = ($containers | Where-Object { $_ -like "*questionwork-redis*" }).Count -gt 0
-    $postgresUp = ($containers | Where-Object { $_ -like "*questionwork-postgres*" }).Count -gt 0
+    $redisName = $null
+    if (($containers | Where-Object { $_ -eq "questionwork_redis" }).Count -gt 0) {
+        $redisName = "questionwork_redis"
+    } elseif (($containers | Where-Object { $_ -eq "questionwork-redis" }).Count -gt 0) {
+        $redisName = "questionwork-redis"
+    }
 
-    Write-Check "Redis (questionwork-redis)"      $redisUp    "port 6379"
-    Write-Check "PostgreSQL (questionwork-pg)"    $postgresUp "not configured yet" -IsWarn:(-not $postgresUp)
+    $postgresName = $null
+    if (($containers | Where-Object { $_ -eq "questionwork_postgres" }).Count -gt 0) {
+        $postgresName = "questionwork_postgres"
+    } elseif (($containers | Where-Object { $_ -eq "questionwork_db" }).Count -gt 0) {
+        $postgresName = "questionwork_db"
+    } elseif (($containers | Where-Object { $_ -eq "questionwork-postgres" }).Count -gt 0) {
+        $postgresName = "questionwork-postgres"
+    }
+
+    $redisUp    = ($null -ne $redisName)
+    $postgresUp = ($null -ne $postgresName)
+
+    Write-Check "Redis container"      $redisUp    "port 6379"
+    Write-Check "PostgreSQL container" $postgresUp "port 5432"
 
     if ($redisUp) {
         try {
-            $ping = docker exec questionwork-redis redis-cli ping 2>&1
+            $ping = docker exec $redisName redis-cli ping 2>&1
             Write-Check "Redis PING response" ($ping -eq "PONG") "$ping"
         } catch {
             Write-Check "Redis PING response" $false "exec failed"
@@ -278,6 +325,7 @@ if ($dockerRunning) {
     }
 } else {
     Write-Host "  [INFO] Docker not running -- skipping container checks" -ForegroundColor DarkGray
+}
 }
 
 # ---------------------------------------------------------------------------
@@ -370,3 +418,10 @@ Write-Host "    Backend   : http://localhost:8000"       -ForegroundColor DarkGr
 Write-Host "    Swagger   : http://localhost:8000/docs"  -ForegroundColor DarkGray
 Write-Host "    Health    : http://localhost:8000/health" -ForegroundColor DarkGray
 Write-Host ""
+
+# Deterministic exit code for CI
+if ($hardFailedChecks -gt 0) {
+    exit 1
+}
+
+exit 0

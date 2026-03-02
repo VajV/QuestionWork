@@ -211,3 +211,41 @@ def check_level_up(current_xp: int, current_grade: GradeEnum) -> Tuple[bool, Gra
         level_up = True
     
     return (level_up, new_grade, estimated_level)
+
+
+# ────────────────────────────────────────────
+# Stat growth on level-up
+# ────────────────────────────────────────────
+
+# Points awarded per level-up
+STAT_POINTS_PER_LEVEL = 3
+# Automatic distribution pattern (INT, DEX, CHA each get +1 per level)
+_STAT_AUTO_DIST = {"int": 1, "dex": 1, "cha": 1}
+
+
+def allocate_stat_points(levels_gained: int = 1) -> dict:
+    """Return the stat delta to apply when gaining *levels_gained* levels.
+
+    For MVP, points are distributed automatically: +1 INT, +1 DEX, +1 CHA per level.
+
+    Args:
+        levels_gained: How many levels were gained (usually 1).
+
+    Returns:
+        Dict with keys ``int``, ``dex``, ``cha``, ``unspent`` (always 0 for auto mode).
+
+    Example::
+
+        >>> allocate_stat_points(1)
+        {'int': 1, 'dex': 1, 'cha': 1, 'unspent': 0}
+        >>> allocate_stat_points(3)
+        {'int': 3, 'dex': 3, 'cha': 3, 'unspent': 0}
+    """
+    if levels_gained < 0:
+        raise ValueError("levels_gained must be ≥ 0")
+    return {
+        "int": _STAT_AUTO_DIST["int"] * levels_gained,
+        "dex": _STAT_AUTO_DIST["dex"] * levels_gained,
+        "cha": _STAT_AUTO_DIST["cha"] * levels_gained,
+        "unspent": 0,
+    }

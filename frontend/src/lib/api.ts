@@ -12,6 +12,8 @@ const API_BASE_URL =
 // In-memory access token (do not persist access tokens in localStorage)
 let ACCESS_TOKEN: string | null = null;
 
+import { triggerLogout } from "@/lib/authEvents";
+
 /** Set current access token in memory. Called by AuthContext after login/refresh. */
 export function setAccessToken(token: string | null) {
   ACCESS_TOKEN = token;
@@ -202,7 +204,9 @@ async function fetchApi<T>(
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
 
-  const token = requireAuth ? getAccessToken() : null;
+  // Always include the bearer token if one is in memory.
+  // requireAuth is only used to make the token mandatory (future use).
+  const token = getAccessToken();
 
   const defaultOptions: RequestInit = {
     headers: {
@@ -258,10 +262,16 @@ async function fetchApi<T>(
         // fallthrough to clean-up below
       }
 
-      // If refresh failed, clear in-memory token and stored user and surface 401
+      // If refresh failed, clear in-memory token and stored user and surface 401.
+      // Only trigger a forced logout+redirect if the user was previously authenticated
+      // (had a token). Anonymous users hitting a protected endpoint just get an error.
+      const hadToken = !!getAccessToken();
       setAccessToken(null);
       if (typeof window !== "undefined") {
         localStorage.removeItem("questionwork_user");
+      }
+      if (hadToken) {
+        triggerLogout();
       }
 
       throw new Response("Unauthorized: Token invalid or expired", {
@@ -541,6 +551,145 @@ export async function getQuestApplications(
 }
 
 // ============================================
+// Badges & Notifications
+// ============================================
+
+/**
+ * Badge from the platform catalogue.
+ */
+export interface Badge {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  criteria_type: string;
+  criteria_value: number;
+}
+
+/**
+ * Badge earned by a user.
+ */
+export interface UserBadgeEarned {
+  id: string;
+  user_id: string;
+  badge_id: string;
+  badge_name: string;
+  badge_description: string;
+  badge_icon: string;
+  earned_at: string;
+}
+
+/**
+ * In-app notification.
+ */
+export interface Notification {
+  id: string;
+  user_id: string;
+  title: string;
+  message: string;
+  event_type: string;
+  is_read: boolean;
+  created_at: string;
+}
+
+export interface NotificationListResponse {
+  notifications: Notification[];
+  total: number;
+  unread_count: number;
+}
+
+// ============================================
+// Notification API functions
+// ============================================
+
+/**
+ * Fetch notifications for the authenticated user.
+ */
+export async function getNotifications(
+  limit = 50,
+  offset = 0,
+  unreadOnly = false,
+): Promise<NotificationListResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    unread_only: String(unreadOnly),
+  });
+  return fetchApi<NotificationListResponse>(
+    `/notifications?${params.toString()}`,
+    {},
+    true,
+  );
+}
+
+/**
+ * Mark a single notification as read.
+ */
+export async function markNotificationRead(
+  notificationId: string,
+): Promise<{ id: string; is_read: boolean }> {
+  return fetchApi<{ id: string; is_read: boolean }>(
+    `/notifications/${notificationId}/read`,
+    { method: "PATCH" },
+    true,
+  );
+}
+
+/**
+ * Mark all notifications as read.
+ */
+export async function markAllNotificationsRead(): Promise<{
+  marked_read: number;
+}> {
+  return fetchApi<{ marked_read: number }>(
+    `/notifications/read-all`,
+    { method: "POST" },
+    true,
+  );
+}
+
+// ============================================
+// Badge API functions
+// ============================================
+
+/**
+ * Fetch the full badge catalogue.
+ */
+export async function getBadgeCatalogue(): Promise<{ badges: Badge[] }> {
+  return fetchApi<{ badges: Badge[] }>(`/badges/catalogue`, {}, false);
+}
+
+/**
+ * Fetch badges earned by the authenticated user.
+ */
+export async function getMyBadges(): Promise<{
+  user_id: string;
+  badges: UserBadgeEarned[];
+  total: number;
+}> {
+  return fetchApi<{ user_id: string; badges: UserBadgeEarned[]; total: number }>(
+    `/badges/me`,
+    {},
+    true,
+  );
+}
+
+/**
+ * Fetch badges earned by any user (public).
+ */
+export async function getUserBadges(userId: string): Promise<{
+  user_id: string;
+  badges: UserBadgeEarned[];
+  total: number;
+}> {
+  return fetchApi<{ user_id: string; badges: UserBadgeEarned[]; total: number }>(
+    `/badges/${userId}`,
+    {},
+    false,
+  );
+}
+
+// ============================================
 // Экспорт по умолчанию
 // ============================================
 
@@ -564,6 +713,14 @@ const api = {
   cancelQuest,
   getQuestApplications,
   getAuthToken,
+  // Notifications
+  getNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
+  // Badges
+  getBadgeCatalogue,
+  getMyBadges,
+  getUserBadges,
 };
 
 export default api;

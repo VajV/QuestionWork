@@ -7,6 +7,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import NotificationBell from "@/components/layout/NotificationBell";
 
 export default function Header() {
   const router = useRouter();
@@ -52,6 +53,7 @@ export default function Header() {
           <div className="flex items-center gap-4">
             {isAuthenticated && user ? (
               <>
+                <NotificationBell enabled={isAuthenticated} />
                 <Link
                   href="/profile"
                   className="flex items-center gap-3 hover:bg-gray-800 rounded-lg px-3 py-2 transition-colors"

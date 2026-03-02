@@ -5,7 +5,7 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
@@ -14,6 +14,8 @@ import Header from "@/components/layout/Header";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import LevelBadge from "@/components/rpg/LevelBadge";
+
+const PAGE_SIZE = 20;
 
 // ─── Grade filter options ────────────────────────────────────────────────────
 
@@ -75,12 +77,13 @@ function FreelancerRow({
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: rank * 0.04 }}
     >
-      <Card
-        className={`p-4 hover:border-purple-500/50 transition-colors ${
-          rank === 1 ? "border-yellow-500/40 bg-yellow-500/5" : ""
-        }`}
-      >
-        <div className="flex items-center gap-4">
+      <Link href={`/users/${user.id}`} className="block">
+        <Card
+          className={`p-4 hover:border-purple-500/50 transition-colors cursor-pointer ${
+            rank === 1 ? "border-yellow-500/40 bg-yellow-500/5" : ""
+          }`}
+        >
+          <div className="flex items-center gap-4">
           {/* Rank */}
           <div className="w-10 text-center flex-shrink-0">
             {rankIcon ? (
@@ -181,8 +184,9 @@ function FreelancerRow({
               )}
             </div>
           )}
-        </div>
-      </Card>
+          </div>
+        </Card>
+      </Link>
     </motion.div>
   );
 }
@@ -197,30 +201,47 @@ export default function MarketplacePage() {
   const [error, setError] = useState<string | null>(null);
   const [gradeFilter, setGradeFilter] = useState<UserGrade | "all">("all");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
 
-  // Load freelancers
-  useEffect(() => {
-    async function load() {
+  // Load freelancers — fetchPage and append are passed explicitly to avoid
+  // stale-closure issues when loadUsers is called from the load-more handler
+  const loadUsers = useCallback(
+    async (fetchPage: number, append: boolean) => {
+      const skip = (fetchPage - 1) * PAGE_SIZE;
       setLoading(true);
       setError(null);
       try {
         const grade =
           gradeFilter === "all" ? undefined : (gradeFilter as UserGrade);
-        const data = await getAllUsers(0, 50, grade);
+        const data = await getAllUsers(skip, PAGE_SIZE, grade);
         // Only show freelancers, sorted by XP descending
         const freelancers = data
           .filter((u) => u.role === "freelancer")
           .sort((a, b) => b.xp - a.xp);
-        setUsers(freelancers);
+        if (append) {
+          setUsers((prev) => [...prev, ...freelancers]);
+        } else {
+          setUsers(freelancers);
+        }
+        setHasMore(data.length === PAGE_SIZE);
+        setPage(fetchPage);
       } catch (err) {
         console.error("Failed to load users:", err);
         setError("Не удалось загрузить список фрилансеров.");
       } finally {
         setLoading(false);
       }
-    }
-    load();
-  }, [gradeFilter]);
+    },
+    [gradeFilter],
+  );
+
+  // Reload from page 1 whenever the grade filter (or initial mount) fires loadUsers
+  useEffect(() => {
+    loadUsers(1, false);
+  }, [loadUsers]);
+
+  const loadMore = () => loadUsers(page + 1, true);
 
   // Client-side search filter
   const filtered = users.filter(
@@ -384,6 +405,19 @@ export default function MarketplacePage() {
               {filtered.map((user, idx) => (
                 <FreelancerRow key={user.id} user={user} rank={idx + 1} />
               ))}
+            </div>
+          )}
+
+          {/* Load more */}
+          {!loading && !error && hasMore && search.trim() === "" && (
+            <div className="mt-6 text-center">
+              <Button
+                variant="secondary"
+                onClick={loadMore}
+                className="px-8 py-3"
+              >
+                Загрузить ещё
+              </Button>
             </div>
           )}
 

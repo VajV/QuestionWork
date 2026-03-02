@@ -87,9 +87,18 @@ def upgrade() -> None:
     """)
 
     import bcrypt
+    import os
 
-    pwd_freelancer = bcrypt.hashpw(b"password123", bcrypt.gensalt()).decode("utf-8")
-    pwd_client = bcrypt.hashpw(b"client123", bcrypt.gensalt()).decode("utf-8")
+    # Seed passwords from environment variables; fall back to random secrets in production.
+    _default_freelancer_pwd = os.environ.get("SEED_FREELANCER_PASSWORD", "password123")
+    _default_client_pwd = os.environ.get("SEED_CLIENT_PASSWORD", "client123")
+
+    pwd_freelancer = bcrypt.hashpw(_default_freelancer_pwd.encode(), bcrypt.gensalt()).decode("utf-8")
+    pwd_client = bcrypt.hashpw(_default_client_pwd.encode(), bcrypt.gensalt()).decode("utf-8")
+
+    # NOTE: These seed users are for development/testing only.
+    # In production, set SEED_FREELANCER_PASSWORD / SEED_CLIENT_PASSWORD env vars
+    # or remove this INSERT block entirely.
 
     op.execute(f"""
     INSERT INTO users (id, username, email, password_hash, role, level, grade, xp, xp_to_next, stats_int, stats_dex, stats_cha, badges, bio, skills, created_at, updated_at)

@@ -15,6 +15,7 @@ import React, {
   useCallback,
   ReactNode,
 } from "react";
+import { useRouter } from "next/navigation";
 import {
   login as apiLogin,
   register as apiRegister,
@@ -22,6 +23,7 @@ import {
   getUserProfile,
   setAccessToken,
 } from "@/lib/api";
+import { registerLogoutHandler } from "@/lib/authEvents";
 import type { UserProfile, LoginData, RegisterData } from "@/lib/api";
 
 // ============================================
@@ -72,6 +74,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const router = useRouter();
 
   /**
    * Инициализация при загрузке приложения
@@ -236,6 +240,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // Вычисляем isAuthenticated на основе наличия токена и пользователя
   const isAuthenticated = !!token && !!user;
+
+  // Register a forced-logout callback so api.ts can redirect on session expiry.
+  // This runs once after logout is stable (useCallback with [] deps).
+  useEffect(() => {
+    registerLogoutHandler(() => {
+      logout();
+      router.push("/auth/login?expired=1");
+    });
+  }, [logout, router]);
 
   // Значение контекста
   const contextValue: AuthContextType = {

@@ -90,3 +90,116 @@ jobs:
         run: |
           cd frontend
           npm test --if-present
+
+  smoke-baseline:
+    runs-on: windows-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: questionwork
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/questionwork
+      REDIS_URL: redis://localhost:6379
+      SECRET_KEY: ci-secret-key
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      FRONTEND_URL: http://localhost:3000
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install backend dependencies
+        shell: pwsh
+        run: |
+          cd backend
+          python -m venv .venv
+          .\.venv\Scripts\Activate.ps1
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov alembic
+
+      - name: Install frontend dependencies
+        shell: pwsh
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Apply migrations
+        shell: pwsh
+        run: |
+          cd backend
+          .\.venv\Scripts\Activate.ps1
+          alembic upgrade head
+
+      - name: Start backend
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "pwsh" -ArgumentList "-NoProfile", "-Command", "cd backend; .\\.venv\\Scripts\\Activate.ps1; uvicorn app.main:app --host 127.0.0.1 --port 8000" -PassThru
+          "BACKEND_PID=$($p.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Start frontend
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "pwsh" -ArgumentList "-NoProfile", "-Command", "cd frontend; npm run dev" -PassThru
+          "FRONTEND_PID=$($p.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Wait for services
+        shell: pwsh
+        run: |
+          for ($i = 0; $i -lt 60; $i++) {
+            try {
+              $h = Invoke-WebRequest -Uri "http://127.0.0.1:8000/health" -UseBasicParsing -TimeoutSec 2
+              $f = Invoke-WebRequest -Uri "http://127.0.0.1:3000" -UseBasicParsing -TimeoutSec 2
+              if ($h.StatusCode -eq 200 -and $f.StatusCode -eq 200) {
+                Write-Host "Services are up"
+                exit 0
+              }
+            } catch {}
+            Start-Sleep -Seconds 2
+          }
+          throw "Backend or Frontend did not start in time"
+
+      - name: Run smoke baseline
+        shell: pwsh
+        run: |
+          .\scripts\smoke-baseline.ps1 -SkipDocker
+
+      - name: Stop services
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:BACKEND_PID) {
+            Stop-Process -Id $env:BACKEND_PID -Force -ErrorAction SilentlyContinue
+          }
+          if ($env:FRONTEND_PID) {
+            Stop-Process -Id $env:FRONTEND_PID -Force -ErrorAction SilentlyContinue
+          }

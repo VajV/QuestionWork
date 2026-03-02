@@ -50,7 +50,8 @@ print("\n=== 1. Register Client ===")
 r, s = api("POST", "/auth/register", {
     "username": f"client_{ts}",
     "email": f"client_{ts}@test.com",
-    "password": "TestPass123!"
+    "password": "TestPass123!",
+    "role": "client"
 })
 test("Register client", s in (200, 201), f"status={s}")
 print(f"     RAW KEYS: {list(r.keys())}")

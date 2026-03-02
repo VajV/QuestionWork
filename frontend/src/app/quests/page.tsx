@@ -11,6 +11,7 @@
 import { useState, useEffect, useCallback } from "react";
 
 import { useAuth } from "@/context/AuthContext";
+import type { QuestFilterState } from "@/types";
 import {
   getQuests,
   applyToQuest,
@@ -26,14 +27,6 @@ import QuestCard from "@/components/quests/QuestCard";
 import QuestFilters from "@/components/quests/QuestFilters";
 import ApplyModal from "@/components/quests/ApplyModal";
 import QuestStatusBadge from "@/components/quests/QuestStatusBadge";
-
-interface QuestFilterState {
-  grade?: UserGrade;
-  status?: QuestStatus;
-  skill?: string;
-  minBudget?: number;
-  maxBudget?: number;
-}
 
 export default function QuestsPage() {
   const { isAuthenticated, user } = useAuth();
@@ -60,19 +53,20 @@ export default function QuestsPage() {
    * Загрузка квестов
    */
   const loadQuests = useCallback(
-    async (reset = false) => {
+    async (reset = false, targetPage?: number) => {
       setLoading(true);
       setError(null);
 
       try {
-        const response = await getQuests(reset ? 1 : page, 10, filters);
+        const fetchPage = reset ? 1 : (targetPage ?? page);
+        const response = await getQuests(fetchPage, 10, filters);
 
         setQuests((prev) =>
           reset ? response.quests : [...prev, ...response.quests],
         );
         setTotal(response.total);
         setHasMore(response.has_more);
-        setPage(response.page);
+        setPage(fetchPage);
       } catch (err) {
         console.error("Ошибка загрузки квестов:", err);
         setError("Не удалось загрузить квесты. Попробуйте позже.");
@@ -134,8 +128,7 @@ export default function QuestsPage() {
    * Загрузка ещё (пагинация)
    */
   const loadMore = () => {
-    setPage(page + 1);
-    loadQuests(false);
+    loadQuests(false, page + 1);
   };
 
   return (

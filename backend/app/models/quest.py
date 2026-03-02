@@ -3,8 +3,8 @@ Pydantic модели для квестов (заказов)
 Используются для валидации данных и документации API
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional, List
+from pydantic import BaseModel, Field, field_validator
+from typing import Annotated, Literal, Optional, List
 from datetime import datetime, timezone
 from enum import Enum
 from app.models.user import GradeEnum
@@ -67,10 +67,20 @@ class QuestCreate(BaseModel):
     title: str = Field(..., description="Заголовок квеста", min_length=5, max_length=200)
     description: str = Field(..., description="Подробное описание задачи", min_length=20, max_length=5000)
     required_grade: GradeEnum = Field(default=GradeEnum.novice, description="Минимальный требуемый грейд")
-    skills: List[str] = Field(default_factory=list, description="Требуемые навыки")
-    budget: float = Field(..., description="Бюджет квеста", ge=100)
-    currency: str = Field(default="RUB", description="Валюта")
+    skills: List[str] = Field(default_factory=list, description="Требуемые навыки (max 20)")
+    budget: float = Field(..., description="Бюджет квеста", ge=100, le=1_000_000)
+    currency: Literal["USD", "EUR", "RUB"] = Field(default="RUB", description="Валюта (USD, EUR, RUB)")
     xp_reward: Optional[int] = Field(None, description="Награда в XP (авто-расчёт если не указан)")
+
+    @field_validator("skills")
+    @classmethod
+    def validate_skills(cls, v: list) -> list:
+        if len(v) > 20:
+            raise ValueError("skills list must contain at most 20 items")
+        for item in v:
+            if len(item) > 50:
+                raise ValueError(f"each skill must be at most 50 characters, got: {item[:20]!r}...")
+        return v
 
 
 class QuestUpdate(BaseModel):
@@ -83,7 +93,7 @@ class QuestUpdate(BaseModel):
     description: Optional[str] = Field(None, description="Подробное описание задачи", min_length=20, max_length=5000)
     required_grade: Optional[GradeEnum] = Field(None, description="Минимальный требуемый грейд")
     skills: Optional[List[str]] = Field(None, description="Требуемые навыки")
-    budget: Optional[float] = Field(None, description="Бюджет квеста", ge=0)
+    budget: Optional[float] = Field(None, description="Бюджет квеста", ge=0, le=1_000_000)
     xp_reward: Optional[int] = Field(None, description="Награда в XP")
 
 
@@ -108,8 +118,8 @@ class QuestApplicationCreate(BaseModel):
     """
     Модель для создания отклика
     """
-    cover_letter: Optional[str] = Field(None, description="Сопроводительное письмо", max_length=1000)
-    proposed_price: Optional[float] = Field(None, description="Предлагаемая цена")
+    cover_letter: Optional[str] = Field(None, description="Сопроводительное письмо (10-1000 символов)", min_length=10, max_length=1000)
+    proposed_price: Optional[float] = Field(None, description="Предлагаемая цена", ge=0)
 
 
 class QuestListResponse(BaseModel):

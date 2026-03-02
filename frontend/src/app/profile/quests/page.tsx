@@ -9,7 +9,7 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { getQuests, Quest, QuestStatus } from "@/lib/api";
@@ -33,54 +33,48 @@ export default function ProfileQuestsPage() {
   /**
    * Загрузка квестов для текущей вкладки
    */
-  useEffect(() => {
-    async function loadQuests() {
-      if (!isAuthenticated || !user) return;
-      
-      setLoading(true);
-      setError(null);
-      
-      try {
-        let statusFilter: QuestStatus | undefined = undefined;
-        
-        if (activeTab === 'completed') {
-          statusFilter = 'completed';
-        } else if (activeTab === 'assigned') {
-          // Квесты где пользователь назначен исполнителем
-          // Пока загружаем все и фильтруем на клиенте
-        }
-        
-        const response = await getQuests(1, 50, {
-          status: statusFilter,
-        });
-        
-        // Фильтрация на клиенте
-        let filteredQuests = response.quests;
-        
-        if (activeTab === 'created') {
-          // Квесты созданные пользователем
-          filteredQuests = filteredQuests.filter(q => q.client_id === user.id);
-        } else if (activeTab === 'assigned') {
-          // Квесты где пользователь назначен исполнителем
-          filteredQuests = filteredQuests.filter(q => q.assigned_to === user.id);
-        } else if (activeTab === 'completed') {
-          // Завершённые квесты пользователя
-          filteredQuests = filteredQuests.filter(q => 
-            q.assigned_to === user.id || q.client_id === user.id
-          );
-        }
-        
-        setQuests(filteredQuests);
-      } catch (err) {
-        console.error("Ошибка загрузки квестов:", err);
-        setError("Не удалось загрузить квесты");
-      } finally {
-        setLoading(false);
+  const loadQuests = useCallback(async () => {
+    if (!isAuthenticated || !user) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      let statusFilter: QuestStatus | undefined = undefined;
+
+      if (activeTab === 'completed') {
+        statusFilter = 'completed';
+      } else if (activeTab === 'assigned') {
+        statusFilter = 'in_progress';
       }
+
+      const response = await getQuests(1, 50, { status: statusFilter });
+
+      // Фильтрация на клиенте
+      let filteredQuests = response.quests;
+
+      if (activeTab === 'created') {
+        filteredQuests = filteredQuests.filter(q => q.client_id === user.id);
+      } else if (activeTab === 'assigned') {
+        filteredQuests = filteredQuests.filter(q => q.assigned_to === user.id);
+      } else if (activeTab === 'completed') {
+        filteredQuests = filteredQuests.filter(
+          q => q.assigned_to === user.id || q.client_id === user.id
+        );
+      }
+
+      setQuests(filteredQuests);
+    } catch (err) {
+      console.error("Ошибка загрузки квестов:", err);
+      setError("Не удалось загрузить квесты");
+    } finally {
+      setLoading(false);
     }
-    
+  }, [activeTab, user?.id, isAuthenticated]);
+
+  useEffect(() => {
     loadQuests();
-  }, [activeTab, isAuthenticated, user]);
+  }, [loadQuests]);
 
   // Редирект если не авторизован
   useEffect(() => {
@@ -162,7 +156,10 @@ export default function ProfileQuestsPage() {
             <div className="text-center">
               <span className="text-4xl mb-2 block">⚠️</span>
               <h3 className="text-xl font-bold text-red-400 mb-2">Ошибка</h3>
-              <p className="text-gray-400">{error}</p>
+              <p className="text-gray-400 mb-4">{error}</p>
+              <Button variant="secondary" onClick={loadQuests}>
+                🔄 Повторить
+              </Button>
             </div>
           </Card>
         )}
