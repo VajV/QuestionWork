@@ -8,6 +8,7 @@ and records every mutation as a transaction ledger entry.
 import logging
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 import asyncpg
@@ -15,6 +16,13 @@ import asyncpg
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _to_decimal(value) -> Decimal:
+    """Safely convert a value to Decimal without float precision loss."""
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
 
 
 def _assert_in_transaction(conn: asyncpg.Connection) -> None:
@@ -61,7 +69,7 @@ async def get_balance(
         currency,
     )
     if row:
-        return float(row["balance"])
+        return _to_decimal(row["balance"])
     # Auto-create with zero balance
     await conn.execute(
         """
@@ -74,7 +82,7 @@ async def get_balance(
         currency,
         datetime.now(timezone.utc),
     )
-    return 0.0
+    return Decimal("0")
 
 
 async def get_all_balances(
@@ -89,7 +97,7 @@ async def get_all_balances(
     return [
         {
             "currency": r["currency"],
-            "balance": float(r["balance"]),
+            "balance": _to_decimal(r["balance"]),
             "version": r["version"],
             "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
         }
@@ -120,7 +128,7 @@ async def get_transaction_history(
         {
             "id": r["id"],
             "quest_id": r["quest_id"],
-            "amount": float(r["amount"]),
+            "amount": _to_decimal(r["amount"]),
             "currency": r["currency"],
             "type": r["type"],
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
@@ -152,6 +160,7 @@ async def credit(
 
     _assert_in_transaction(conn)
 
+    amount = _to_decimal(amount)
     now = datetime.now(timezone.utc)
 
     # Lock the wallet row
@@ -162,7 +171,7 @@ async def credit(
     )
 
     if wallet:
-        new_balance = float(wallet["balance"]) + amount
+        new_balance = _to_decimal(wallet["balance"]) + amount
         await conn.execute(
             "UPDATE wallets SET balance = $1, version = version + 1, updated_at = $2 WHERE id = $3",
             new_balance,
@@ -222,6 +231,7 @@ async def debit(
 
     _assert_in_transaction(conn)
 
+    amount = _to_decimal(amount)
     now = datetime.now(timezone.utc)
 
     wallet = await conn.fetchrow(
@@ -233,7 +243,7 @@ async def debit(
     if not wallet:
         raise InsufficientFundsError(f"No wallet found for user {user_id} / {currency}")
 
-    current_balance = float(wallet["balance"])
+    current_balance = _to_decimal(wallet["balance"])
     if current_balance < amount:
         raise InsufficientFundsError(
             f"Insufficient funds: {current_balance} < {amount} {currency}"
@@ -301,15 +311,18 @@ async def split_payment(
     """
     _assert_in_transaction(conn)
 
+    gross_amount = _to_decimal(gross_amount)
+
     if fee_percent is None:
         fee_percent = settings.PLATFORM_FEE_PERCENT
 
-    if not (0 <= fee_percent < 100):
+    fee_pct = _to_decimal(fee_percent)
+    if not (Decimal("0") <= fee_pct < Decimal("100")):
         raise ValueError(f"fee_percent must be in [0, 100), got {fee_percent}")
 
-    # Round to 2dp to avoid floating-point drift
-    platform_fee = round(gross_amount * fee_percent / 100, 2)
-    freelancer_amount = round(gross_amount - platform_fee, 2)
+    # Use Decimal for precise financial math
+    platform_fee = (gross_amount * fee_pct / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    freelancer_amount = gross_amount - platform_fee
 
     # Credit freelancer
     freelancer_balance = await credit(
@@ -322,7 +335,7 @@ async def split_payment(
     )
 
     # Credit platform wallet (only if fee > 0)
-    platform_balance: Optional[float] = None
+    platform_balance: Optional[Decimal] = None
     if platform_fee > 0:
         platform_balance = await credit(
             conn,
@@ -386,13 +399,13 @@ async def create_withdrawal(
     if not wallet:
         raise InsufficientFundsError(f"No wallet found for user {user_id} / {currency}")
 
-    current_balance = float(wallet["balance"])
+    current_balance = _to_decimal(wallet["balance"])
     if current_balance < amount:
         raise InsufficientFundsError(
             f"Insufficient funds: {current_balance} < {amount} {currency}"
         )
 
-    new_balance = round(current_balance - amount, 2)
+    new_balance = (current_balance - _to_decimal(amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     await conn.execute(
         "UPDATE wallets SET balance = $1, version = version + 1, updated_at = $2 WHERE id = $3",
         new_balance,

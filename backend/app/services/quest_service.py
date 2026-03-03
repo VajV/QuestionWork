@@ -298,35 +298,39 @@ async def assign_freelancer(
     current_user: UserProfile,
 ) -> Quest:
     """Assign a freelancer to a quest. Returns updated Quest."""
-    quest = await conn.fetchrow("SELECT * FROM quests WHERE id = $1", quest_id)
-    if not quest:
-        raise ValueError("Quest not found")
+    async with conn.transaction():
+        # Lock the quest row to prevent concurrent assignment
+        quest = await conn.fetchrow(
+            "SELECT * FROM quests WHERE id = $1 FOR UPDATE", quest_id
+        )
+        if not quest:
+            raise ValueError("Quest not found")
 
-    if quest["client_id"] != current_user.id:
-        raise PermissionError("Only client can assign freelancer")
+        if quest["client_id"] != current_user.id:
+            raise PermissionError("Only client can assign freelancer")
 
-    if quest["status"] != QuestStatusEnum.open.value:
-        raise ValueError(f"Cannot assign freelancer to quest with status: {quest['status']}")
+        if quest["status"] != QuestStatusEnum.open.value:
+            raise ValueError(f"Cannot assign freelancer to quest with status: {quest['status']}")
 
-    app = await conn.fetchrow(
-        "SELECT id FROM applications WHERE quest_id = $1 AND freelancer_id = $2",
-        quest_id,
-        freelancer_id,
-    )
-    if not app:
-        raise ValueError("This user has not applied to the quest")
+        app = await conn.fetchrow(
+            "SELECT id FROM applications WHERE quest_id = $1 AND freelancer_id = $2",
+            quest_id,
+            freelancer_id,
+        )
+        if not app:
+            raise ValueError("This user has not applied to the quest")
 
-    now = datetime.now(timezone.utc)
-    await conn.execute(
-        "UPDATE quests SET assigned_to = $1, status = $2, updated_at = $3 WHERE id = $4",
-        freelancer_id,
-        QuestStatusEnum.in_progress.value,
-        now,
-        quest_id,
-    )
+        now = datetime.now(timezone.utc)
+        await conn.execute(
+            "UPDATE quests SET assigned_to = $1, status = $2, updated_at = $3 WHERE id = $4",
+            freelancer_id,
+            QuestStatusEnum.in_progress.value,
+            now,
+            quest_id,
+        )
 
-    updated_row = await conn.fetchrow("SELECT * FROM quests WHERE id = $1", quest_id)
-    apps = await _fetch_quest_applications(conn, quest_id)
+        updated_row = await conn.fetchrow("SELECT * FROM quests WHERE id = $1", quest_id)
+        apps = await _fetch_quest_applications(conn, quest_id)
     return row_to_quest(updated_row, apps)
 
 
@@ -340,27 +344,31 @@ async def mark_quest_complete(
     current_user: UserProfile,
 ) -> Tuple[Quest, int]:
     """Freelancer marks a quest as completed. Returns (quest, xp_reward)."""
-    quest = await conn.fetchrow("SELECT * FROM quests WHERE id = $1", quest_id)
-    if not quest:
-        raise ValueError("Quest not found")
+    async with conn.transaction():
+        # Lock quest to prevent concurrent status changes
+        quest = await conn.fetchrow(
+            "SELECT * FROM quests WHERE id = $1 FOR UPDATE", quest_id
+        )
+        if not quest:
+            raise ValueError("Quest not found")
 
-    if quest["status"] != QuestStatusEnum.in_progress.value:
-        raise ValueError("Can only complete quest that is in progress")
+        if quest["status"] != QuestStatusEnum.in_progress.value:
+            raise ValueError("Can only complete quest that is in progress")
 
-    if quest["assigned_to"] != current_user.id:
-        raise PermissionError("Only assigned freelancer can complete quest")
+        if quest["assigned_to"] != current_user.id:
+            raise PermissionError("Only assigned freelancer can complete quest")
 
-    now = datetime.now(timezone.utc)
-    await conn.execute(
-        "UPDATE quests SET status = $1, completed_at = $2, updated_at = $3 WHERE id = $4",
-        QuestStatusEnum.completed.value,
-        now,
-        now,
-        quest_id,
-    )
+        now = datetime.now(timezone.utc)
+        await conn.execute(
+            "UPDATE quests SET status = $1, completed_at = $2, updated_at = $3 WHERE id = $4",
+            QuestStatusEnum.completed.value,
+            now,
+            now,
+            quest_id,
+        )
 
-    updated_row = await conn.fetchrow("SELECT * FROM quests WHERE id = $1", quest_id)
-    apps = await _fetch_quest_applications(conn, quest_id)
+        updated_row = await conn.fetchrow("SELECT * FROM quests WHERE id = $1", quest_id)
+        apps = await _fetch_quest_applications(conn, quest_id)
     return row_to_quest(updated_row, apps), quest["xp_reward"]
 
 
@@ -390,6 +398,10 @@ async def confirm_quest_completion(
     if quest["status"] != QuestStatusEnum.completed.value:
         raise ValueError("Quest has not been marked as completed by freelancer")
 
+    # Guard: if already confirmed, reject (prevents double-payment)
+    if quest["status"] == QuestStatusEnum.confirmed.value:
+        raise ValueError("Quest has already been confirmed and paid")
+
     freelancer_row = await conn.fetchrow(
         "SELECT * FROM users WHERE id = $1", quest["assigned_to"]
     )
@@ -400,7 +412,7 @@ async def confirm_quest_completion(
     quest_grade = GradeEnum(quest["required_grade"])
     freelancer_grade = GradeEnum(freelancer_row["grade"])
 
-    xp_reward, money_reward = calculate_quest_rewards(
+    xp_reward = calculate_quest_rewards(
         budget=float(quest["budget"]),
         quest_grade=quest_grade,
         user_grade=freelancer_grade,
@@ -423,6 +435,17 @@ async def confirm_quest_completion(
 
     # ── Atomic transaction ────────────────────
     async with conn.transaction():
+        # 0. Lock quest row and flip status to 'confirmed' FIRST to prevent double-payment
+        updated = await conn.fetchval(
+            "UPDATE quests SET status = $1, updated_at = $2 WHERE id = $3 AND status = $4 RETURNING id",
+            QuestStatusEnum.confirmed.value,
+            now,
+            quest_id,
+            QuestStatusEnum.completed.value,
+        )
+        if not updated:
+            raise ValueError("Quest was already confirmed or status changed concurrently")
+
         # 1. Update freelancer XP / grade / stats
         await conn.execute(
             """
@@ -456,11 +479,13 @@ async def confirm_quest_completion(
         )
 
         # 3. Badge check — count confirmed quests for freelancer
+        #    (status is already 'confirmed' for this quest after step 0)
         completed_count_row = await conn.fetchval(
-            "SELECT COUNT(*) FROM quests WHERE assigned_to = $1 AND status = 'confirmed'",
+            "SELECT COUNT(*) FROM quests WHERE assigned_to = $1 AND status = $2",
             quest["assigned_to"],
+            QuestStatusEnum.confirmed.value,
         )
-        quests_completed = int(completed_count_row or 0) + 1  # include this one
+        quests_completed = int(completed_count_row or 0)  # already includes this one
         badge_event_data = {
             "quests_completed": quests_completed,
             "xp": new_xp,
@@ -536,7 +561,7 @@ async def cancel_quest(
     if quest["client_id"] != current_user.id:
         raise PermissionError("Only client can cancel quest")
 
-    if quest["status"] in [QuestStatusEnum.completed.value, QuestStatusEnum.cancelled.value]:
+    if quest["status"] in [QuestStatusEnum.completed.value, QuestStatusEnum.confirmed.value, QuestStatusEnum.cancelled.value]:
         raise ValueError(f"Cannot cancel quest with status: {quest['status']}")
 
     now = datetime.now(timezone.utc)

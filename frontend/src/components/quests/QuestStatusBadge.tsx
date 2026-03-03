@@ -36,9 +36,15 @@ const statusConfig: Record<QuestStatus, {
     description: 'Герой в пути',
   },
   completed: {
+    color: 'border-yellow-600 bg-yellow-950/40 text-yellow-400 shadow-[0_0_10px_rgba(202,138,4,0.3)]',
+    icon: '✅',
+    label: 'Ожидает подтв.',
+    description: 'Ждёт подтверждения клиента',
+  },
+  confirmed: {
     color: 'border-purple-600 bg-purple-950/40 text-purple-400 shadow-[0_0_10px_rgba(147,51,234,0.3)]',
     icon: '🏆',
-    label: 'Завершён',
+    label: 'Подтверждён',
     description: 'Слава получена',
   },
   cancelled: {

@@ -56,7 +56,7 @@ export type UserGrade = "novice" | "junior" | "middle" | "senior";
 /**
  * Статус квеста
  */
-export type QuestStatus = "open" | "in_progress" | "completed" | "cancelled";
+export type QuestStatus = "open" | "in_progress" | "completed" | "confirmed" | "cancelled";
 
 /**
  * Квест (заказ) на бирже

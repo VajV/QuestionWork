@@ -1,12 +1,11 @@
 """
-Настройка подключения к PostgreSQL через asyncpg + SQLAlchemy async sessions.
+Настройка подключения к PostgreSQL через asyncpg.
 """
 
 import logging
 from typing import AsyncGenerator
 
 import asyncpg
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
 
@@ -23,14 +22,6 @@ def _asyncpg_url() -> str:
     url = settings.DATABASE_URL
     if url.startswith("postgresql+asyncpg://"):
         url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
-    return url
-
-
-def _sa_url() -> str:
-    """Return DATABASE_URL suitable for SQLAlchemy asyncpg driver."""
-    url = settings.DATABASE_URL
-    if url.startswith("postgresql://"):
-        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
     return url
 
 
@@ -70,26 +61,3 @@ async def get_db_connection() -> AsyncGenerator[asyncpg.Connection, None]:
 
     async with pool.acquire() as connection:
         yield connection
-
-
-# ────────────────────────────────────────────
-# SQLAlchemy async engine & session factory
-# ────────────────────────────────────────────
-engine = create_async_engine(
-    _sa_url(),
-    pool_size=5,
-    max_overflow=10,
-    echo=False,
-)
-
-async_session_factory = async_sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
-
-
-async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency: yields a SQLAlchemy async session (auto-closes)."""
-    async with async_session_factory() as session:
-        yield session

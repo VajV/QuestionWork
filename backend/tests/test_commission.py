@@ -137,7 +137,7 @@ class TestSplitPayment:
             gross_amount=100.0,
             fee_percent=33.333,
         )
-        total = round(result["freelancer_amount"] + result["platform_fee"], 2)
+        total = float(result["freelancer_amount"]) + float(result["platform_fee"])
         assert abs(total - 100.0) <= 0.01  # within 1 kopek
 
     @pytest.mark.asyncio
@@ -160,8 +160,8 @@ class TestSplitPayment:
                 gross_amount=100.0,
                 fee_percent=10.0,
             )
-            platform_total += r["platform_fee"]
-            freelancer_total += r["freelancer_amount"]
+            platform_total += float(r["platform_fee"])
+            freelancer_total += float(r["freelancer_amount"])
 
         assert abs(platform_total - 1000.0) < 0.01
         assert abs(freelancer_total - 9000.0) < 0.01

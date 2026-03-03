@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
+import ErrorBoundary from "@/components/ui/ErrorBoundary";
 
 export const metadata: Metadata = {
   title: "QuestionWork - IT Freelance RPG",
@@ -17,10 +18,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ru">
-      <body className="bg-gray-900 text-white min-h-screen">
-        <AuthProvider>
-          {children}
-        </AuthProvider>
+      <body className="bg-gray-950 text-white min-h-screen">
+        <ErrorBoundary>
+          <AuthProvider>
+            {children}
+          </AuthProvider>
+        </ErrorBoundary>
       </body>
     </html>
   );

@@ -100,15 +100,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
           // persist user profile for UI across reloads
           localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(data.user));
         } else {
-          // If refresh didn't work, fallback to stored user if present
-          const storedUser = localStorage.getItem(STORAGE_KEY_USER);
-          if (storedUser) {
-            try {
-              setUser(JSON.parse(storedUser));
-            } catch {
-              localStorage.removeItem(STORAGE_KEY_USER);
-            }
-          }
+          // Refresh failed — clear stale user data so isAuthenticated stays false
+          // and the UI doesn't show a logged-in state without a valid token.
+          localStorage.removeItem(STORAGE_KEY_USER);
         }
       } catch (error) {
         console.error("Ошибка инициализации аутентификации:", error);

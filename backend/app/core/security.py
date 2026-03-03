@@ -27,6 +27,11 @@ _IN_MEMORY_REFRESH_STORE = {}
 def _get_redis_client():
     """Return a Redis client or None if REDIS_URL is not set or connection fails."""
     if not settings.REDIS_URL:
+        if settings.APP_ENV.lower() == "production":
+            raise RuntimeError(
+                "Redis is required in production for refresh token storage. "
+                "Set REDIS_URL in your environment."
+            )
         return None
     try:
         client = redis_lib.from_url(settings.REDIS_URL, decode_responses=True)
@@ -34,6 +39,11 @@ def _get_redis_client():
         client.ping()
         return client
     except Exception:
+        if settings.APP_ENV.lower() == "production":
+            raise RuntimeError(
+                "Redis is not available but required in production. "
+                "Check REDIS_URL and ensure Redis is running."
+            )
         logger.warning("Redis is not available; using in-memory refresh token store")
         return None
 

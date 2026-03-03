@@ -27,6 +27,7 @@ export default function ProfileQuestsPage() {
   
   const [activeTab, setActiveTab] = useState<TabType>('created');
   const [quests, setQuests] = useState<Quest[]>([]);
+  const [allUserQuests, setAllUserQuests] = useState<Quest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,25 +41,29 @@ export default function ProfileQuestsPage() {
     setError(null);
 
     try {
-      let statusFilter: QuestStatus | undefined = undefined;
+      // Fetch all quests related to user (no status filter) for correct tab counts
+      const allResponse = await getQuests(1, 100);
+      const allRelated = allResponse.quests.filter(
+        q => q.client_id === user.id || q.assigned_to === user.id
+      );
+      setAllUserQuests(allRelated);
 
-      if (activeTab === 'completed') {
-        statusFilter = 'completed';
-      } else if (activeTab === 'assigned') {
-        statusFilter = 'in_progress';
-      }
-
-      const response = await getQuests(1, 50, { status: statusFilter });
-
-      // Фильтрация на клиенте
-      let filteredQuests = response.quests;
+      let filteredQuests: Quest[] = [];
 
       if (activeTab === 'created') {
-        filteredQuests = filteredQuests.filter(q => q.client_id === user.id);
+        const response = await getQuests(1, 50);
+        filteredQuests = response.quests.filter(q => q.client_id === user.id);
       } else if (activeTab === 'assigned') {
-        filteredQuests = filteredQuests.filter(q => q.assigned_to === user.id);
+        const response = await getQuests(1, 50, { status: 'in_progress' });
+        filteredQuests = response.quests.filter(q => q.assigned_to === user.id);
       } else if (activeTab === 'completed') {
-        filteredQuests = filteredQuests.filter(
+        // Fetch both completed and confirmed quests
+        const [completedRes, confirmedRes] = await Promise.all([
+          getQuests(1, 50, { status: 'completed' }),
+          getQuests(1, 50, { status: 'confirmed' }),
+        ]);
+        const all = [...completedRes.quests, ...confirmedRes.quests];
+        filteredQuests = all.filter(
           q => q.assigned_to === user.id || q.client_id === user.id
         );
       }
@@ -128,7 +133,7 @@ export default function ProfileQuestsPage() {
                 : 'bg-black/40 text-gray-400 border-gray-800 hover:border-gray-600 hover:text-gray-300'
             }`}
           >
-            📝 Размещённые Контракты ({quests.filter(q => q.client_id === user.id).length})
+            📝 Размещённые Контракты ({allUserQuests.filter(q => q.client_id === user.id).length})
           </button>
           <button
             onClick={() => setActiveTab('assigned')}
@@ -138,7 +143,7 @@ export default function ProfileQuestsPage() {
                 : 'bg-black/40 text-gray-400 border-gray-800 hover:border-gray-600 hover:text-gray-300'
             }`}
           >
-            ⚡ Активные Миссии ({quests.filter(q => q.assigned_to === user.id && q.status === 'in_progress').length})
+            ⚡ Активные Миссии ({allUserQuests.filter(q => q.assigned_to === user.id && q.status === 'in_progress').length})
           </button>
           <button
             onClick={() => setActiveTab('completed')}
@@ -148,7 +153,7 @@ export default function ProfileQuestsPage() {
                 : 'bg-black/40 text-gray-400 border-gray-800 hover:border-gray-600 hover:text-gray-300'
             }`}
           >
-            ✅ Былая Слава ({quests.filter(q => q.status === 'completed' && (q.assigned_to === user.id || q.client_id === user.id)).length})
+            ✅ Былая Слава ({allUserQuests.filter(q => (q.status === 'completed' || q.status === 'confirmed') && (q.assigned_to === user.id || q.client_id === user.id)).length})
           </button>
         </div>
 

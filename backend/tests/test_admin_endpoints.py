@@ -79,7 +79,6 @@ def client():
     with (
         patch("app.main.init_db_pool", new_callable=AsyncMock),
         patch("app.main.close_db_pool", new_callable=AsyncMock),
-        patch("app.main.engine", new_callable=AsyncMock),
     ):
         from app.main import app
         from app.db.session import get_db_connection

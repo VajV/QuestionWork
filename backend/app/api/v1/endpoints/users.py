@@ -9,24 +9,12 @@ from typing import Dict, List, Optional
 import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
+from app.api.deps import require_auth
 from app.db.session import get_db_connection
 from app.models.user import GradeEnum, UserBadge, UserProfile, UserRoleEnum, UserStats, row_to_user_profile
 from app.core.otel_utils import db_span
 
 router = APIRouter(prefix="/users", tags=["Пользователи"])
-
-
-def _require_user_auth(authorization: Optional[str] = None) -> None:
-    """Standalone helper — validates that a Bearer token header was supplied.
-    Actual token verification happens in get_current_user inside quests.py;
-    here we just guard unauthenticated callers.
-    """
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
 
 
 @router.get("/{user_id}", response_model=UserProfile)
@@ -49,10 +37,9 @@ async def get_all_users(
     limit: int = Query(default=20, le=100),
     grade: Optional[str] = None,
     role: Optional[str] = None,
-    authorization: Optional[str] = Header(None),
+    current_user: UserProfile = Depends(require_auth),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _require_user_auth(authorization)
     query = "SELECT * FROM users WHERE 1=1"
     args = []
     arg_idx = 1

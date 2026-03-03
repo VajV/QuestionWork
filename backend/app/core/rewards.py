@@ -122,9 +122,12 @@ def calculate_quest_rewards(
     quest_grade: GradeEnum,
     user_grade: GradeEnum,
     custom_xp: int = None
-) -> Tuple[int, float]:
+) -> int:
     """
-    Полный расчёт наград за квест
+    Расчёт награды в XP за квест.
+
+    Money reward is computed by wallet_service.split_payment() at confirmation
+    time (with platform fee deduction), so this function only returns XP.
     
     Args:
         budget: Бюджет квеста
@@ -133,15 +136,10 @@ def calculate_quest_rewards(
         custom_xp: Кастомная награда (если указана)
     
     Returns:
-        Кортеж (xp_reward, money_reward)
+        Количество XP для начисления
     """
     xp_reward = calculate_xp_reward(budget, quest_grade, user_grade, custom_xp)
-    
-    # Денежная награда = бюджет (вся сумма идёт исполнителю)
-    # В будущем здесь будет комиссия биржи
-    money_reward = budget
-    
-    return (xp_reward, money_reward)
+    return xp_reward
 
 
 # Cumulative XP thresholds for grade promotion (single source of truth)

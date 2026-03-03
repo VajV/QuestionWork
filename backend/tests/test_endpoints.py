@@ -152,10 +152,17 @@ def test_users_list_requires_auth(client):
 
 
 def test_users_list_accepts_bearer(client):
-    """Any Bearer token passes the format guard; mock DB returns empty list â†' 200."""
-    r = client.get("/api/v1/users/", headers={"Authorization": "Bearer sometoken"})
-    assert r.status_code == 200
-    assert r.json() == []
+    """Proper JWT via dependency override â†' 200."""
+    from app.api.deps import require_auth
+    from app.main import app
+
+    app.dependency_overrides[require_auth] = lambda: _make_user("client")
+    try:
+        r = client.get("/api/v1/users/")
+        assert r.status_code == 200
+        assert r.json() == []
+    finally:
+        app.dependency_overrides.pop(require_auth, None)
 
 
 def test_users_list_rejects_non_bearer(client):

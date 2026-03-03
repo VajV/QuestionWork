@@ -27,14 +27,13 @@ def test_calculate_xp_reward_custom_xp():
     assert calculate_xp_reward(1000, GradeEnum.novice, GradeEnum.novice, custom_xp=9999) == 500
 
 
-def test_calculate_quest_rewards_money_equals_budget():
-    xp, money = calculate_quest_rewards(
+def test_calculate_quest_rewards_returns_xp():
+    xp = calculate_quest_rewards(
         budget=2500,
         quest_grade=GradeEnum.novice,
         user_grade=GradeEnum.novice,
     )
     assert xp >= 10
-    assert money == 2500
 
 
 def test_check_level_up_thresholds():
@@ -80,6 +79,5 @@ def test_check_level_up_senior_stays():
 
 def test_calculate_quest_rewards_with_custom_xp():
     """Custom XP propagates through calculate_quest_rewards."""
-    xp, money = calculate_quest_rewards(5000, GradeEnum.middle, GradeEnum.junior, custom_xp=42)
+    xp = calculate_quest_rewards(5000, GradeEnum.middle, GradeEnum.junior, custom_xp=42)
     assert xp == 42
-    assert money == 5000

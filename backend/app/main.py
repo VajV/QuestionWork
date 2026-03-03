@@ -7,9 +7,11 @@ import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, Response
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 import time
+
+import re
 
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
@@ -56,7 +58,7 @@ except Exception:
 load_dotenv()
 
 from app.api.v1.api import api_router
-from app.db.session import close_db_pool, engine, init_db_pool
+from app.db.session import close_db_pool, init_db_pool
 
 
 # Initialize structured logging
@@ -78,8 +80,6 @@ async def lifespan(app: FastAPI):
     yield
     # Закрытие пула при остановке
     await close_db_pool()
-    # Dispose SQLAlchemy engine for clean shutdown
-    await engine.dispose()
 
 
 # Создаём FastAPI приложение
@@ -133,12 +133,22 @@ async def tracing_middleware(request: Request, call_next):
         raise
 
 
+# Regex to normalize dynamic path segments for Prometheus labels.
+# Matches UUIDs, hex IDs (user_abc123), and numeric IDs.
+_PATH_ID_RE = re.compile(r"/(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|user_[a-z0-9]+|\d+)(?=/|$)")
+
+
+def _normalize_path(path: str) -> str:
+    """Replace dynamic path segments with {id} to avoid Prometheus label explosion."""
+    return _PATH_ID_RE.sub("/{id}", path)
+
+
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
     start = time.time()
     response: Response = await call_next(request)
     elapsed = time.time() - start
-    path = request.url.path
+    path = _normalize_path(request.url.path)
     method = request.method
     status = str(response.status_code)
     try:
@@ -149,9 +159,11 @@ async def metrics_middleware(request: Request, call_next):
     return response
 
 
-@app.get("/metrics")
+from app.api.deps import require_auth
+
+@app.get("/metrics", dependencies=[Depends(require_auth)])
 def metrics():
-    """Prometheus metrics endpoint."""
+    """Prometheus metrics endpoint (requires authentication)."""
     data = generate_latest()
     return Response(content=data, media_type=CONTENT_TYPE_LATEST)
 

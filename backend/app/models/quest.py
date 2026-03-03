@@ -14,7 +14,8 @@ class QuestStatusEnum(str, Enum):
     """Статусы квеста"""
     open = "open"  # Открыт, принимает отклики
     in_progress = "in_progress"  # В работе
-    completed = "completed"  # Завершён
+    completed = "completed"  # Завершён (фрилансер отметил, ждёт подтверждения)
+    confirmed = "confirmed"  # Подтверждён клиентом, оплата произведена
     cancelled = "cancelled"  # Отменён
 
 

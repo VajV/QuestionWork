@@ -41,10 +41,10 @@ export default function NotificationBell({
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
-        className="relative p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+        className="relative p-2 rounded-full hover:bg-gray-800 transition-colors"
       >
         <svg
-          className="w-5 h-5 text-gray-600 dark:text-gray-300"
+          className="w-5 h-5 text-gray-300"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -66,16 +66,16 @@ export default function NotificationBell({
 
       {/* Dropdown panel */}
       {open && (
-        <div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 z-50">
+        <div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto bg-gray-900 rounded-xl shadow-lg border border-gray-700 z-50">
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-            <span className="font-semibold text-sm text-gray-800 dark:text-gray-100">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+            <span className="font-semibold text-sm text-gray-100">
               Notifications
             </span>
             {unreadCount > 0 && (
               <button
                 onClick={markAllRead}
-                className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+                className="text-xs text-amber-400 hover:underline"
               >
                 Mark all as read
               </button>
@@ -84,11 +84,11 @@ export default function NotificationBell({
 
           {/* Body */}
           {loading && notifications.length === 0 ? (
-            <p className="p-4 text-sm text-gray-500 dark:text-gray-400">
+            <p className="p-4 text-sm text-gray-400">
               Loading…
             </p>
           ) : notifications.length === 0 ? (
-            <p className="p-4 text-sm text-gray-500 dark:text-gray-400">
+            <p className="p-4 text-sm text-gray-400">
               No notifications yet.
             </p>
           ) : (
@@ -113,19 +113,19 @@ function NotifItem({
 }) {
   return (
     <li
-      className={`px-4 py-3 border-b last:border-0 border-gray-100 dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${
-        !n.is_read ? "bg-indigo-50 dark:bg-indigo-900/20" : ""
+      className={`px-4 py-3 border-b last:border-0 border-gray-700 cursor-pointer hover:bg-gray-800/50 transition-colors ${
+        !n.is_read ? "bg-amber-900/20" : ""
       }`}
       onClick={() => !n.is_read && onRead(n.id)}
     >
-      <p className="text-sm font-medium text-gray-800 dark:text-gray-100">
+      <p className="text-sm font-medium text-gray-100">
         {n.title}
       </p>
-      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">
+      <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">
         {n.message}
       </p>
       {!n.is_read && (
-        <span className="inline-block mt-1 w-2 h-2 rounded-full bg-indigo-500" />
+        <span className="inline-block mt-1 w-2 h-2 rounded-full bg-amber-500" />
       )}
     </li>
   );

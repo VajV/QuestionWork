@@ -4,6 +4,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime, timezone
 
+import contextlib
+
 from app.models.user import GradeEnum, UserProfile, UserRoleEnum, UserStats
 from app.models.quest import QuestApplicationCreate, QuestCreate, QuestStatusEnum
 from app.services import quest_service
@@ -14,11 +16,22 @@ from app.services import quest_service
 # ---------------------------------------------------------------------------
 
 
+class _FakeTransaction:
+    """Minimal async context manager that mimics asyncpg Transaction."""
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
 def _make_conn():
     """Create a mock asyncpg connection with async methods."""
     conn = AsyncMock()
     # AsyncMock auto-attrs are truthy, so is_in_transaction passes _assert_in_transaction
     conn.is_in_transaction = MagicMock(return_value=True)
+    # conn.transaction() must return an async context manager, not a coroutine
+    conn.transaction = MagicMock(return_value=_FakeTransaction())
     return conn
 
 

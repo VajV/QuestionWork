@@ -98,12 +98,9 @@ def _validate_settings(s: Settings) -> None:
             "SECRET_KEY is not set or uses the insecure default. "
             "Set SECRET_KEY in your environment or .env file before starting."
         )
-        # In production we must fail fast; in development log a warning.
-        if s.APP_ENV.lower() == "production":
-            logger.error(msg)
-            raise RuntimeError(msg)
-        else:
-            logger.warning(msg)
+        # Always fail fast — never run with the default secret, even in dev.
+        logger.error(msg)
+        raise RuntimeError(msg)
 
     if not s.DATABASE_URL:
         msg = "DATABASE_URL is not set. Set a Postgres DATABASE_URL for the app."
