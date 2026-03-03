@@ -1,14 +1,38 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Inter:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --background: #0f0f1a;
+  /* Background */
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-card: #21262d;
+  
+  /* Borders */
+  --border-default: #30363d;
+  --border-highlight: #8b5cf6;
+  
+  /* Rarity Colors (для уровней/грейдов) */
+  --rarity-novice: #94a3b8;   /* silver */
+  --rarity-junior: #22c55e;   /* green */
+  --rarity-middle: #3b82f6;   /* blue */
+  --rarity-senior: #f59e0b;   /* gold */
+  
+  /* XP Bar */
+  --xp-gradient-start: #7c3aed;
+  --xp-gradient-end: #c084fc;
+  
+  /* Glow Effects */
+  --glow-purple: rgba(139, 92, 246, 0.4);
+  --glow-gold: rgba(245, 158, 11, 0.3);
+
+  /* Fallback for existing vars */
+  --background: var(--bg-primary);
   --foreground: #e0e0e0;
   --accent: #8b5cf6;
-  --accent-glow: rgba(139, 92, 246, 0.5);
+  --accent-glow: var(--glow-purple);
 }
 
 * {
@@ -21,9 +45,140 @@ html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
-  background: var(--background);
+  background: var(--bg-primary);
   color: var(--foreground);
   font-family: 'Inter', sans-serif;
+}
+
+/* === RPG Classes === */
+.font-cinzel { font-family: 'Cinzel', serif; }
+.font-mono { font-family: 'JetBrains Mono', monospace; }
+
+/* === RPG Card Base === */
+.rpg-card {
+  background: linear-gradient(145deg, #21262d 0%, #161b22 100%);
+  border: 2px solid #30363d;
+  border-radius: 8px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* === Ornamental Corners === */
+.rpg-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 20px; height: 20px;
+  border-top: 3px solid #8b5cf6;
+  border-left: 3px solid #8b5cf6;
+  border-radius: 8px 0 0 0;
+  pointer-events: none;
+}
+.rpg-card::after {
+  content: '';
+  position: absolute;
+  bottom: 0; right: 0;
+  width: 20px; height: 20px;
+  border-bottom: 3px solid #8b5cf6;
+  border-right: 3px solid #8b5cf6;
+  border-radius: 0 0 8px 0;
+  pointer-events: none;
+}
+
+/* === Rarity Borders === */
+.rarity-novice { border-color: var(--rarity-novice); }
+.rarity-junior { border-color: var(--rarity-junior); }
+.rarity-middle { border-color: var(--rarity-middle); }
+.rarity-senior { border-color: var(--rarity-senior); }
+
+/* === XP Bar RPG Style === */
+.xp-bar-track {
+  background: #0d1117;
+  border: 2px solid #30363d;
+  border-radius: 4px;
+  height: 16px;
+  overflow: hidden;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+}
+.xp-bar-fill {
+  background: linear-gradient(90deg, var(--xp-gradient-start) 0%, var(--xp-gradient-end) 100%);
+  height: 100%;
+  transition: width 0.5s ease;
+  box-shadow: 0 0 10px rgba(124, 58, 237, 0.5);
+}
+
+/* === Stat Bar (INT/DEX/CHA) === */
+.stat-bar {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 3px;
+  height: 10px;
+  overflow: hidden;
+}
+.stat-bar-fill-int { 
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.4);
+  height: 100%;
+  transition: width 0.5s ease;
+}
+.stat-bar-fill-dex { 
+  background: linear-gradient(90deg, #22c55e, #4ade80);
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
+  height: 100%;
+  transition: width 0.5s ease;
+}
+.stat-bar-fill-cha { 
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+  height: 100%;
+  transition: width 0.5s ease;
+}
+
+/* === Decorative Divider === */
+.divider-ornament {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 24px 0;
+}
+.divider-ornament::before,
+.divider-ornament::after {
+  content: '';
+  flex: 1;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #30363d, transparent);
+}
+.divider-ornament span {
+  padding: 0 16px;
+  color: #8b5cf6;
+  font-size: 20px;
+}
+
+/* === Glow Effects === */
+.glow-purple {
+  box-shadow: 0 0 20px var(--glow-purple);
+}
+.glow-gold {
+  box-shadow: 0 0 20px var(--glow-gold);
+}
+
+/* === Avatar Frame (RPG style) === */
+.avatar-frame {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 4px solid #8b5cf6;
+  box-shadow: 0 0 25px rgba(139, 92, 246, 0.5);
+  position: relative;
+}
+.avatar-frame::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  border: 2px dashed rgba(139, 92, 246, 0.4);
+  animation: rotate 20s linear infinite;
+  pointer-events: none;
 }
 
 /* RPG Scrollbar */

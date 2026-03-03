@@ -24,28 +24,28 @@ const statusConfig: Record<QuestStatus, {
   description: string;
 }> = {
   open: {
-    color: 'from-green-500 to-green-700 text-green-100 border-green-600',
-    icon: '🟢',
+    color: 'border-green-600 bg-green-950/40 text-green-400 shadow-[0_0_10px_rgba(22,163,74,0.3)]',
+    icon: '⚔️',
     label: 'Открыт',
-    description: 'Ищет исполнителя',
+    description: 'Ожидает героя',
   },
   in_progress: {
-    color: 'from-blue-500 to-blue-700 text-blue-100 border-blue-600',
-    icon: '🔵',
+    color: 'border-blue-600 bg-blue-950/40 text-blue-400 shadow-[0_0_10px_rgba(37,99,235,0.3)]',
+    icon: '⏳',
     label: 'В работе',
-    description: 'Фрилансер выполняет',
+    description: 'Герой в пути',
   },
   completed: {
-    color: 'from-purple-500 to-purple-700 text-purple-100 border-purple-600',
-    icon: '🟣',
+    color: 'border-purple-600 bg-purple-950/40 text-purple-400 shadow-[0_0_10px_rgba(147,51,234,0.3)]',
+    icon: '🏆',
     label: 'Завершён',
-    description: 'Ожидает подтверждения',
+    description: 'Слава получена',
   },
   cancelled: {
-    color: 'from-gray-500 to-gray-700 text-gray-100 border-gray-600',
-    icon: '⚫',
+    color: 'border-gray-600 bg-gray-900/40 text-gray-400 shadow-[0_0_10px_rgba(75,85,99,0.3)]',
+    icon: '💀',
     label: 'Отменён',
-    description: 'Квест отменён',
+    description: 'Контракт сожжён',
   },
 };
 
@@ -53,9 +53,9 @@ const statusConfig: Record<QuestStatus, {
  * Размеры бейджа
  */
 const sizeStyles = {
-  sm: 'text-xs px-2 py-1',
-  md: 'text-sm px-3 py-1.5',
-  lg: 'text-base px-4 py-2',
+  sm: 'text-[10px] px-2 py-0.5',
+  md: 'text-xs px-3 py-1',
+  lg: 'text-sm px-4 py-1.5',
 };
 
 export default function QuestStatusBadge({
@@ -67,15 +67,15 @@ export default function QuestStatusBadge({
   const sizeStyle = sizeStyles[size];
 
   return (
-    <div className="inline-flex flex-col items-start">
+    <div className="inline-flex flex-col items-start font-cinzel tracking-wider uppercase font-bold">
       <span
-        className={`inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r ${config.color} ${sizeStyle} font-medium shadow-lg border`}
+        className={`inline-flex items-center gap-1.5 rounded border ${config.color} ${sizeStyle}`}
       >
         <span>{config.icon}</span>
         <span>{config.label}</span>
       </span>
       {showDescription && (
-        <span className="text-xs text-gray-400 mt-1">
+        <span className="text-[10px] font-mono normal-case tracking-normal text-gray-500 mt-1">
           {config.description}
         </span>
       )}

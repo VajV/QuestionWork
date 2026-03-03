@@ -28,10 +28,10 @@ export default function BadgeGrid({
 
   if (badges.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 p-8 text-center">
-        <span className="text-4xl">🏅</span>
-        <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-          No badges earned yet. Complete quests to unlock achievements!
+      <div className="rpg-card min-h-[160px] border-dashed flex flex-col items-center justify-center p-8 text-center bg-gray-950/30">
+        <span className="text-4xl filter grayscale opacity-50 mb-4 drop-shadow-md">🏅</span>
+        <p className="text-sm font-cinzel text-gray-500 uppercase tracking-widest">
+          Коллекция пуста. Выполняйте квесты, чтобы заслужить первые достижения!
         </p>
       </div>
     );
@@ -43,8 +43,8 @@ export default function BadgeGrid({
         <BadgeCard key={b.id} badge={b} showDate={showDate} />
       ))}
       {limit && badges.length > limit && (
-        <div className="flex items-center justify-center rounded-xl border border-gray-200 dark:border-gray-700 p-4 text-sm text-gray-500 dark:text-gray-400">
-          +{badges.length - limit} more
+        <div className="flex items-center justify-center rounded border border-gray-700 bg-gray-900/50 p-4 font-mono text-sm text-gray-500">
+          +{badges.length - limit} ещё
         </div>
       )}
     </div>
@@ -67,19 +67,20 @@ function BadgeCard({
   return (
     <div
       title={b.badge_description}
-      className="flex flex-col items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 shadow-sm hover:shadow-md transition-shadow"
+      className="group flex flex-col items-center gap-3 rounded border border-purple-900/30 bg-gray-900/80 p-5 shadow-lg relative overflow-hidden transition-all duration-300 hover:scale-105 hover:border-purple-500/60 hover:bg-purple-950/20 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] cursor-pointer"
     >
-      <span className="text-3xl" aria-hidden>
+      <div className="absolute inset-0 bg-gradient-to-br from-purple-500/[0.05] to-transparent pointer-events-none" />
+      <span className="text-4xl drop-shadow-[0_0_8px_rgba(168,85,247,0.8)] filter transition-all group-hover:scale-110 group-hover:drop-shadow-[0_0_15px_rgba(168,85,247,1)]" aria-hidden>
         {b.badge_icon}
       </span>
-      <span className="text-xs font-semibold text-center text-gray-800 dark:text-gray-100 leading-tight">
+      <span className="text-sm font-cinzel font-bold text-center text-purple-200 leading-tight">
         {b.badge_name}
       </span>
-      <span className="text-xs text-center text-gray-500 dark:text-gray-400 line-clamp-2">
+      <span className="text-[10px] font-inter text-center text-gray-400 line-clamp-2">
         {b.badge_description}
       </span>
       {showDate && (
-        <span className="text-xs text-gray-400 dark:text-gray-500">
+        <span className="text-[10px] font-mono text-gray-500 mt-auto border-t border-gray-800 w-full text-center pt-2">
           {earnedDate}
         </span>
       )}

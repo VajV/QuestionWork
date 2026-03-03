@@ -125,59 +125,50 @@ export default function ProfilePage() {
           </h1>
 
           {/* Основная карточка профиля */}
-          <div className="glass-card p-6 mb-6">
-            <div className="flex flex-col md:flex-row gap-6 items-center">
-              {/* Аватар */}
-              <div className="relative">
-                <div className="w-32 h-32 rounded-full bg-gradient-to-br from-purple-500 via-violet-600 to-purple-900 flex items-center justify-center text-4xl font-bold ring-4 ring-purple-500/40 shadow-[0_0_40px_rgba(139,92,246,0.5)]">
+          <div className="rpg-card p-8 flex flex-col md:flex-row gap-8 items-center relative overflow-hidden mb-6">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-purple-600 rounded-full blur-[100px] opacity-20 pointer-events-none"></div>
+
+            <div className="avatar-frame relative z-10 shrink-0">
+              <div className="w-full h-full bg-gray-900 rounded-full flex items-center justify-center border-4 border-amber-900/50 shadow-inner">
+                <span className="text-5xl font-cinzel text-amber-500 font-bold drop-shadow-[0_0_8px_rgba(217,119,6,0.8)]">
                   {profile.username[0].toUpperCase()}
-                </div>
-                <div className="absolute -bottom-2 -right-2">
-                  <LevelBadge level={profile.level} grade={profile.grade} />
-                </div>
+                </span>
               </div>
-
-              {/* Инфо */}
-              <div className="flex-1 w-full">
-                <h2 className="text-2xl font-bold mb-2">{profile.username}</h2>
-                <p className="text-gray-400 mb-4">{profile.email}</p>
-                
-                {/* Роль */}
-                <div className="mb-4">
-                  <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium ${
-                    profile.role === 'client'
-                      ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30 shadow-[0_0_8px_rgba(59,130,246,0.4)]'
-                      : 'bg-green-500/20 text-green-300 border border-green-500/30 shadow-[0_0_8px_rgba(34,197,94,0.4)]'
-                  }`}>
-                    {profile.role === 'client' ? <Briefcase size={14} aria-hidden="true" focusable="false" /> : <User size={14} aria-hidden="true" focusable="false" />}
-                    {profile.role === 'client' ? 'Клиент' : 'Фрилансер'}
-                  </span>
-                </div>
-                
-                {/* XP Bar */}
-                <div className="mb-4">
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-purple-300">Experience</span>
-                    <span className="text-purple-300">{profile.xp} / {profile.xp_to_next} XP</span>
-                  </div>
-                  <div className="w-full bg-white/5 backdrop-blur-sm border border-white/10 rounded-full h-4 relative overflow-hidden">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${xpPercent}%` }}
-                      transition={{ duration: 1, delay: 0.3 }}
-                      className="h-full bg-gradient-to-r from-violet-600 via-purple-500 to-fuchsia-400 shadow-[0_0_12px_rgba(139,92,246,0.7)]"
-                    />
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    До следующего уровня: {profile.xp_to_next - profile.xp} XP
-                  </p>
-                </div>
-
-                {/* Метаданные */}
-                <div className="flex gap-4 text-sm text-gray-400">
-                  <span>📅 Зарегистрирован: {new Date(profile.created_at).toLocaleDateString('ru-RU')}</span>
-                </div>
+              
+              <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-black border-2 border-amber-600 rounded px-4 py-1 shadow-[0_0_15px_rgba(217,119,6,0.6)] z-20">
+                <span className="font-cinzel text-amber-500 font-bold whitespace-nowrap">Ур. {profile.level}</span>
               </div>
+            </div>
+
+            <div className="flex-1 w-full relative z-10">
+               <div className="flex justify-between items-start">
+                  <div>
+                     <h1 className="text-4xl font-cinzel text-gray-100 font-bold tracking-wider mb-2 drop-shadow-md">
+                       {profile.username}
+                     </h1>
+                     <p className="text-amber-600/80 font-inter uppercase tracking-[0.2em] text-sm mb-6 flex items-center gap-2">
+                       {profile.role === 'client' ? <Briefcase size={14} /> : <User size={14} />} 
+                       {profile.role === 'client' ? 'Клиент' : 'Фрилансер'}
+                     </p>
+                  </div>
+                  <LevelBadge level={profile.level} grade={profile.grade} size="lg" showGradeText={true} />
+               </div>
+
+               {/* Интегрированный XP бар */}
+               <div className="mt-4">
+                  <div className="flex justify-between font-mono text-sm text-gray-400 mb-2">
+                    <span>ОПЫТ</span>
+                    <span className="text-purple-400">{profile.xp} / {profile.xp_to_next} XP</span>
+                  </div>
+                  <div className="xp-bar-track relative overflow-hidden">
+                     <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${Math.min(xpPercent, 100)}%` }}
+                        transition={{ duration: 1, delay: 0.3 }}
+                        className="xp-bar-fill h-full absolute top-0 left-0" 
+                     />
+                  </div>
+               </div>
             </div>
           </div>
 
@@ -185,9 +176,9 @@ export default function ProfilePage() {
           <StatsPanel stats={profile.stats} />
 
           {/* Бейджи */}
-          <div className="glass-card p-6 mt-6">
-            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <Award className="text-yellow-400" size={24} aria-hidden="true" focusable="false" /> Достижения
+          <div className="rpg-card p-6 mt-6">
+            <h3 className="text-xl font-cinzel text-amber-500 mb-4 flex items-center gap-2 border-b border-amber-900/30 pb-2">
+              <Award className="text-amber-500" size={24} aria-hidden="true" focusable="false" /> Достижения
             </h3>
             <BadgeGrid badges={earnedBadges} />
           </div>

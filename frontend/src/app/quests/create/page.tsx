@@ -206,21 +206,23 @@ export default function CreateQuestPage() {
           className="max-w-2xl mx-auto"
         >
           {/* Page header */}
-          <div className="text-center mb-8">
-            <h1 className="text-4xl font-bold mb-2">
-              <span className="text-purple-400">✨</span>{" "}
-              <span className="text-white">Создать квест</span>
+          <div className="text-center mb-8 mt-4">
+            <h1 className="text-3xl md:text-4xl font-cinzel font-bold mb-2 text-amber-500 flex items-center justify-center gap-3 drop-shadow-[0_0_10px_rgba(217,119,6,0.5)] uppercase tracking-widest">
+              <span className="text-3xl grayscale">✍️</span>
+              Объявить Контракт
+              <span className="text-3xl grayscale">📜</span>
             </h1>
-            <p className="text-gray-400">Опишите задачу — фрилансеры откликнутся</p>
+            <div className="divider-ornament w-64 mx-auto my-4"></div>
+            <p className="text-gray-400 font-inter">Опишите задачу — и наёмники откликнутся на ваш зов</p>
           </div>
 
           {/* Tip for clients */}
           {user?.role === "freelancer" && (
-            <Card className="p-4 mb-6 border-yellow-500/30 bg-yellow-500/10">
-              <p className="text-yellow-300 text-sm">
-                💡 Вы зарегистрированы как <strong>фрилансер</strong>. Квесты обычно
-                создают клиенты, но ничто не мешает вам разместить задание тоже.
-              </p>
+            <Card className="mb-6 p-0 border-none bg-transparent">
+              <div className="bg-yellow-950/30 border border-yellow-700/50 p-4 rounded text-yellow-300 text-sm font-mono shadow-[inset_0_0_15px_rgba(234,179,8,0.1)]">
+                <span className="mr-2">💡</span>
+                Вы примкнули к фракции <strong>Наёмников</strong>. Обычно контракты создают Заказчики, но законы Гильдии не запрещают вам искать помощь.
+              </div>
             </Card>
           )}
 
@@ -229,7 +231,7 @@ export default function CreateQuestPage() {
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mb-6 p-4 bg-red-900/30 border border-red-500/50 rounded-lg text-red-200 text-sm"
+              className="mb-6 p-4 bg-red-950/40 border border-red-900/50 rounded font-mono text-red-500 text-sm shadow-[0_0_10px_rgba(220,38,38,0.2)]"
             >
               ⚠️ {error}
             </motion.div>
@@ -237,279 +239,279 @@ export default function CreateQuestPage() {
 
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Title */}
-            <Card className="p-6">
-              <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-                <span>📝</span> Основное
-              </h2>
+            <Card className="p-0 border-none bg-transparent">
+              <div className="rpg-card p-6 md:p-8">
+                <h2 className="text-xl font-cinzel font-bold mb-6 text-amber-500 flex items-center gap-3 border-b border-amber-900/30 pb-3">
+                  <span className="grayscale opacity-70">📝</span> Суть Задания
+                </h2>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1">
-                    Название квеста <span className="text-red-400">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={form.title}
-                    onChange={(e) => updateField("title", e.target.value)}
-                    maxLength={100}
-                    placeholder="Например: Разработать Telegram-бота для записи клиентов"
-                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white placeholder-gray-500 transition-colors"
-                    disabled={loading}
-                  />
-                  <div className="flex justify-between mt-1">
-                    <span className="text-xs text-gray-500">Минимум 5 символов</span>
-                    <span className={`text-xs ${form.title.length > 90 ? "text-yellow-400" : "text-gray-500"}`}>
-                      {form.title.length}/100
-                    </span>
+                <div className="space-y-6">
+                  <div>
+                    <label className="block text-xs font-mono uppercase tracking-widest text-gray-500 mb-2">
+                      Заголовок Свитка <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={form.title}
+                      onChange={(e) => updateField("title", e.target.value)}
+                      maxLength={100}
+                      placeholder="Например: Создать голема для сбора ресурсов"
+                      className="w-full px-4 py-3 bg-black/50 border border-gray-800 rounded font-inter focus:outline-none focus:border-amber-500 text-gray-200 placeholder-gray-600 transition-colors shadow-inner"
+                      disabled={loading}
+                    />
+                    <div className="flex justify-between mt-2 font-mono">
+                      <span className="text-xs text-gray-600">От 5 рун</span>
+                      <span className={`text-xs ${form.title.length > 90 ? "text-amber-500" : "text-gray-600"}`}>
+                        {form.title.length}/100
+                      </span>
+                    </div>
                   </div>
-                </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1">
-                    Описание задачи <span className="text-red-400">*</span>
-                  </label>
-                  <textarea
-                    value={form.description}
-                    onChange={(e) => updateField("description", e.target.value)}
-                    maxLength={2000}
-                    rows={6}
-                    placeholder="Подробно опишите что нужно сделать, какой результат ожидается, есть ли дизайн/ТЗ..."
-                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white placeholder-gray-500 resize-y transition-colors"
-                    disabled={loading}
-                  />
-                  <div className="flex justify-between mt-1">
-                    <span className="text-xs text-gray-500">Минимум 20 символов</span>
-                    <span className={`text-xs ${form.description.length > 1800 ? "text-yellow-400" : "text-gray-500"}`}>
-                      {form.description.length}/2000
-                    </span>
+                  <div>
+                    <label className="block text-xs font-mono uppercase tracking-widest text-gray-500 mb-2">
+                      Подробности <span className="text-red-500">*</span>
+                    </label>
+                    <textarea
+                      value={form.description}
+                      onChange={(e) => updateField("description", e.target.value)}
+                      maxLength={2000}
+                      rows={6}
+                      placeholder="Опишите, что нужно совершить, какие артефакты требуются и так далее..."
+                      className="w-full px-4 py-3 bg-black/50 border border-gray-800 rounded font-inter focus:outline-none focus:border-amber-500 text-gray-200 placeholder-gray-600 resize-y transition-colors shadow-inner"
+                      disabled={loading}
+                    />
+                    <div className="flex justify-between mt-2 font-mono">
+                      <span className="text-xs text-gray-600">От 20 рун</span>
+                      <span className={`text-xs ${form.description.length > 1800 ? "text-amber-500" : "text-gray-600"}`}>
+                        {form.description.length}/2000
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
             </Card>
 
             {/* Grade */}
-            <Card className="p-6">
-              <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-                <span>🎮</span> Требуемый грейд
-              </h2>
-              <div className="grid grid-cols-2 gap-3">
-                {GRADE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => updateField("required_grade", opt.value)}
-                    className={`p-4 rounded-lg border-2 text-left transition-all ${
-                      form.required_grade === opt.value
-                        ? "border-purple-500 bg-purple-500/20"
-                        : "border-gray-700 bg-gray-800 hover:border-gray-600"
-                    }`}
-                    disabled={loading}
-                  >
-                    <div className="text-2xl mb-1">{opt.icon}</div>
-                    <div className="font-bold text-white text-sm">{opt.label}</div>
-                    <div className="text-xs text-gray-400 mt-1">{opt.description}</div>
-                  </button>
-                ))}
+            <Card className="p-0 border-none bg-transparent">
+              <div className="rpg-card p-6 md:p-8">
+                <h2 className="text-xl font-cinzel font-bold mb-6 text-purple-400 flex items-center gap-3 border-b border-purple-900/30 pb-3">
+                  <span className="grayscale opacity-70">🎮</span> Минимальный Ранг
+                </h2>
+                <div className="grid grid-cols-2 gap-4 mt-4">
+                  {GRADE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => updateField("required_grade", opt.value)}
+                      className={`p-4 rounded border-2 text-left transition-all ${
+                        form.required_grade === opt.value
+                          ? "border-amber-500 bg-amber-950/20 shadow-[inset_0_0_10px_rgba(217,119,6,0.2)]"
+                          : "border-gray-800 bg-black/40 hover:border-gray-600 hover:bg-gray-900/50"
+                      }`}
+                      disabled={loading}
+                    >
+                      <div className="text-2xl mb-2 opacity-80">{opt.icon}</div>
+                      <div className="font-cinzel font-bold text-gray-200 text-sm tracking-wider">{opt.label}</div>
+                      <div className="text-xs text-gray-500 font-inter mt-1 leading-relaxed">{opt.description}</div>
+                    </button>
+                  ))}
+                </div>
               </div>
             </Card>
 
             {/* Skills */}
-            <Card className="p-6">
-              <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-                <span>🛠️</span> Необходимые навыки{" "}
-                <span className="text-sm font-normal text-gray-400">
-                  (до 10)
-                </span>
-              </h2>
+            <Card className="p-0 border-none bg-transparent">
+              <div className="rpg-card p-6 md:p-8">
+                <h2 className="text-xl font-cinzel font-bold mb-6 text-gray-100 flex items-center gap-3 border-b border-gray-800 pb-3">
+                  <span className="grayscale opacity-70">🛠️</span> Инструменты & Чары{" "}
+                  <span className="text-sm font-mono text-gray-500 ml-2">
+                    (до 10)
+                  </span>
+                </h2>
 
-              {/* Selected skills */}
-              {form.skills.length > 0 && (
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {form.skills.map((skill) => (
-                    <span
-                      key={skill}
-                      className="flex items-center gap-1 px-3 py-1 bg-purple-600/30 border border-purple-500/50 rounded-full text-sm text-purple-200"
-                    >
-                      {skill}
-                      <button
-                        type="button"
-                        onClick={() => removeSkill(skill)}
-                        className="ml-1 text-purple-400 hover:text-red-400 transition-colors leading-none"
-                        title="Удалить навык"
+                {/* Selected skills */}
+                {form.skills.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-6">
+                    {form.skills.map((skill) => (
+                      <span
+                        key={skill}
+                        className="flex items-center gap-2 px-3 py-1 bg-purple-950/40 border border-purple-800/60 rounded font-mono text-sm text-purple-200 shadow-sm"
                       >
-                        ×
-                      </button>
-                    </span>
-                  ))}
+                        {skill}
+                        <button
+                          type="button"
+                          onClick={() => removeSkill(skill)}
+                          className="text-purple-400 hover:text-red-400 font-bold transition-colors leading-none"
+                          title="Развеять чары"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Manual input */}
+                <div className="flex flex-col sm:flex-row gap-3 mb-6">
+                  <input
+                    type="text"
+                    value={skillInput}
+                    onChange={(e) => setSkillInput(e.target.value)}
+                    onKeyDown={handleSkillKeyDown}
+                    placeholder="Назовите навык и нажмите Enter..."
+                    className="flex-1 px-4 py-3 bg-black/50 border border-gray-800 rounded font-inter focus:outline-none focus:border-purple-500 text-gray-200 placeholder-gray-600 text-sm shadow-inner transition-colors"
+                    disabled={loading || form.skills.length >= 10}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => addSkill(skillInput)}
+                    disabled={loading || !skillInput.trim() || form.skills.length >= 10}
+                    className="text-sm px-6 font-cinzel border-purple-900/50 hover:border-purple-500/50"
+                  >
+                    + Вплести
+                  </Button>
                 </div>
-              )}
 
-              {/* Manual input */}
-              <div className="flex gap-2 mb-4">
-                <input
-                  type="text"
-                  value={skillInput}
-                  onChange={(e) => setSkillInput(e.target.value)}
-                  onKeyDown={handleSkillKeyDown}
-                  placeholder="Введите навык и нажмите Enter..."
-                  className="flex-1 px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white placeholder-gray-500 text-sm"
-                  disabled={loading || form.skills.length >= 10}
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => addSkill(skillInput)}
-                  disabled={loading || !skillInput.trim() || form.skills.length >= 10}
-                  className="text-sm px-4"
-                >
-                  + Добавить
-                </Button>
-              </div>
-
-              {/* Popular skills */}
-              <div>
-                <p className="text-xs text-gray-500 mb-2">Популярные навыки:</p>
-                <div className="flex flex-wrap gap-2">
-                  {POPULAR_SKILLS.filter((s) => !form.skills.includes(s)).slice(0, 20).map((skill) => (
-                    <button
-                      key={skill}
-                      type="button"
-                      onClick={() => addSkill(skill)}
-                      disabled={loading || form.skills.length >= 10}
-                      className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-400 hover:border-purple-500 hover:text-purple-300 transition-colors disabled:opacity-40"
-                    >
-                      {skill}
-                    </button>
-                  ))}
+                {/* Popular skills */}
+                <div>
+                  <p className="text-xs font-mono uppercase tracking-widest text-gray-500 mb-3">Известные манускрипты:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {POPULAR_SKILLS.filter((s) => !form.skills.includes(s)).slice(0, 20).map((skill) => (
+                      <button
+                        key={skill}
+                        type="button"
+                        onClick={() => addSkill(skill)}
+                        disabled={loading || form.skills.length >= 10}
+                        className="px-3 py-1.5 bg-gray-900 border border-gray-800 rounded font-mono text-xs text-gray-400 hover:border-purple-700 hover:text-purple-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        + {skill}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             </Card>
 
             {/* Budget & XP */}
-            <Card className="p-6">
-              <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-                <span>💰</span> Бюджет и награда
-              </h2>
+            <Card className="p-0 border-none bg-transparent">
+              <div className="rpg-card p-6 md:p-8">
+                <h2 className="text-xl font-cinzel font-bold mb-6 text-green-500 flex items-center gap-3 border-b border-green-900/30 pb-3">
+                  <span className="grayscale opacity-70">💰</span> Предлагаемая Добыча
+                </h2>
 
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1">
-                    Бюджет <span className="text-red-400">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    value={form.budget}
-                    onChange={(e) => updateField("budget", e.target.value)}
-                    placeholder="5000"
-                    min="1"
-                    max="10000000"
-                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white placeholder-gray-500"
-                    disabled={loading}
-                  />
-                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
+                  <div>
+                    <label className="block text-xs font-mono uppercase tracking-widest text-gray-500 mb-2">
+                      Награда <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      value={form.budget}
+                      onChange={(e) => updateField("budget", e.target.value)}
+                      placeholder="5000"
+                      min="1"
+                      max="10000000"
+                      className="w-full px-4 py-3 bg-black/50 border border-gray-800 rounded font-mono focus:outline-none focus:border-green-500 text-gray-200 placeholder-gray-600 shadow-inner transition-colors"
+                      disabled={loading}
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1">
-                    Валюта
-                  </label>
-                  <select
-                    value={form.currency}
-                    onChange={(e) => updateField("currency", e.target.value)}
-                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white"
-                    disabled={loading}
-                  >
-                    {CURRENCY_OPTIONS.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">
-                  XP награда{" "}
-                  <span className="text-gray-500 font-normal">(необязательно, 10–500)</span>
-                </label>
-                <div className="flex gap-3 items-center">
-                  <input
-                    type="number"
-                    value={form.xp_reward}
-                    onChange={(e) => updateField("xp_reward", e.target.value)}
-                    placeholder={suggested !== null ? `Авто: ${suggested} XP` : "Например: 150"}
-                    min="10"
-                    max="500"
-                    className="flex-1 px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white placeholder-gray-500"
-                    disabled={loading}
-                  />
-                  {suggested !== null && !form.xp_reward && (
-                    <button
-                      type="button"
-                      onClick={() => updateField("xp_reward", String(suggested))}
-                      className="text-sm text-purple-400 hover:text-purple-300 whitespace-nowrap"
+                  <div>
+                    <label className="block text-xs font-mono uppercase tracking-widest text-gray-500 mb-2">
+                      Валюта
+                    </label>
+                    <select
+                      value={form.currency}
+                      onChange={(e) => updateField("currency", e.target.value)}
+                      className="w-full px-4 py-3 bg-black/50 border border-gray-800 rounded font-mono focus:outline-none focus:border-green-500 text-gray-200 shadow-inner transition-colors"
+                      disabled={loading}
                     >
-                      ← Взять {suggested} XP
-                    </button>
-                  )}
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  Если не заполнено — рассчитывается автоматически (10% от бюджета)
-                </p>
-              </div>
-
-              {/* Budget preview */}
-              {form.budget && parseFloat(form.budget) > 0 && (
-                <div className="mt-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
-                  <p className="text-xs text-gray-400 mb-1">Предпросмотр награды:</p>
-                  <div className="flex gap-6 text-sm">
-                    <span className="text-green-400 font-bold">
-                      💰 {parseFloat(form.budget).toLocaleString("ru-RU")} {form.currency}
-                    </span>
-                    <span className="text-purple-400 font-bold">
-                      ⚡ {form.xp_reward || suggested || "~"} XP
-                    </span>
+                      {CURRENCY_OPTIONS.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
-              )}
+
+                <div>
+                  <label className="block text-xs font-mono uppercase tracking-widest text-gray-500 mb-2">
+                    Даруемый Опыт{" "}
+                    <span className="text-gray-600 normal-case tracking-normal ml-2">(по желанию, 10–500 XP)</span>
+                  </label>
+                  <div className="flex flex-col sm:flex-row gap-3 items-center">
+                    <input
+                      type="number"
+                      value={form.xp_reward}
+                      onChange={(e) => updateField("xp_reward", e.target.value)}
+                      placeholder={suggested !== null ? `Предсказано: ${suggested} XP` : "Например: 150"}
+                      min="10"
+                      max="500"
+                      className="w-full sm:flex-1 px-4 py-3 bg-black/50 border border-gray-800 rounded font-mono focus:outline-none focus:border-purple-500 text-gray-200 placeholder-gray-600 shadow-inner transition-colors"
+                      disabled={loading}
+                    />
+                    {suggested !== null && !form.xp_reward && (
+                      <button
+                        type="button"
+                        onClick={() => updateField("xp_reward", String(suggested))}
+                        className="text-sm font-mono text-purple-400 hover:text-purple-300 bg-purple-950/30 px-3 py-2 rounded border border-purple-800/50 whitespace-nowrap transition-colors"
+                      >
+                        ← Принять {suggested} XP
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2 font-inter italic">
+                    * Если оставить пустым — гильдия рассчитает опыт автоматически (10% от золота)
+                  </p>
+                </div>
+
+                {/* Budget preview */}
+                {form.budget && parseFloat(form.budget) > 0 && (
+                  <div className="mt-6 p-4 bg-gray-900/50 border border-gray-800 rounded font-mono">
+                    <p className="text-xs text-gray-500 uppercase tracking-widest mb-2">Награда за успешно выполненный долг:</p>
+                    <div className="flex gap-8 text-base">
+                      <span className="text-amber-500 font-bold drop-shadow-[0_0_8px_rgba(217,119,6,0.5)]">
+                        💰 {parseFloat(form.budget).toLocaleString("ru-RU")} {form.currency}
+                      </span>
+                      <span className="text-purple-400 font-bold drop-shadow-[0_0_8px_rgba(168,85,247,0.5)]">
+                        ⚡ {form.xp_reward || suggested || "~"} XP
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
             </Card>
 
             {/* Actions */}
-            <div className="flex gap-4">
+            <div className="flex flex-col sm:flex-row gap-4 mt-8">
               <Button
                 type="submit"
                 variant="primary"
-                className="flex-1 py-3 text-base font-bold"
+                className="flex-1 py-4 text-lg font-cinzel tracking-wider shadow-[0_0_15px_rgba(217,119,6,0.3)] hover:shadow-[0_0_25px_rgba(217,119,6,0.5)]"
                 disabled={loading}
               >
                 {loading ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                      <circle
-                        className="opacity-25"
-                        cx="12" cy="12" r="10"
-                        stroke="currentColor" strokeWidth="4" fill="none"
-                      />
-                      <path
-                        className="opacity-75" fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      />
+                  <span className="flex items-center justify-center gap-3">
+                    <svg className="animate-spin h-5 w-5 text-amber-500" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                     </svg>
-                    Создаём квест...
+                    Запечатываем...
                   </span>
                 ) : (
-                  "🚀 Разместить квест"
+                  "📜 Прибить к Доске"
                 )}
               </Button>
 
-              <Link href="/quests">
-                <Button type="button" variant="secondary" className="py-3 px-6">
-                  Отмена
+              <Link href="/quests" className="sm:w-1/3">
+                <Button type="button" variant="secondary" className="w-full h-full font-cinzel tracking-wider border-purple-900/50 hover:border-purple-500/50">
+                  Вернуться
                 </Button>
               </Link>
             </div>
 
-            <p className="text-center text-xs text-gray-500">
-              Размещая квест, вы соглашаетесь с правилами платформы.
-              После размещения фрилансеры смогут откликнуться.
+            <p className="text-center text-xs text-gray-600 font-inter max-w-sm mx-auto mt-6">
+              Объявляя контракт, вы клянётесь соблюдать Кодекс Гильдии. Невыплата награды карается изгнанием.
             </p>
           </form>
         </motion.div>

@@ -95,26 +95,30 @@ function FreelancerRow({
 
           {/* Avatar */}
           <div className="relative flex-shrink-0">
-            <div
-              className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold ${
-                rank === 1
-                  ? "bg-gradient-to-br from-yellow-500 to-orange-600"
-                  : "bg-gradient-to-br from-purple-500 to-purple-700"
-              }`}
-            >
-              {user.username[0].toUpperCase()}
+            <div className="avatar-frame w-12 h-12">
+               <div
+                  className={`w-full h-full rounded-full flex items-center justify-center text-lg font-bold border-2 ${
+                    rank === 1
+                      ? "bg-gradient-to-br from-yellow-500 to-orange-600 border-yellow-300"
+                      : "bg-gradient-to-br from-purple-800 to-gray-900 border-purple-500/50"
+                  }`}
+                >
+                  <span className="font-cinzel text-white drop-shadow-md">
+                     {user.username[0].toUpperCase()}
+                  </span>
+                </div>
             </div>
             <div className="absolute -bottom-1 -right-1 scale-75">
-              <LevelBadge level={user.level} grade={user.grade} />
+              <LevelBadge level={user.level} grade={user.grade} showGradeText={false} />
             </div>
           </div>
 
           {/* Name + XP bar */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <span className="font-bold text-white truncate">{user.username}</span>
+              <span className="font-cinzel font-bold text-gray-200 truncate">{user.username}</span>
               <span
-                className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
+                className={`text-[10px] uppercase font-mono px-2 py-0.5 rounded border font-bold tracking-widest ${
                   GRADE_COLORS[user.grade as UserGrade]
                 }`}
               >
@@ -124,35 +128,35 @@ function FreelancerRow({
 
             {/* XP bar */}
             <div className="flex items-center gap-2">
-              <div className="flex-1 bg-gray-700 rounded-full h-1.5 overflow-hidden">
+              <div className="flex-1 xp-bar-track h-1.5 overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-purple-600 to-purple-400 transition-all duration-700"
+                  className="xp-bar-fill h-full transition-all duration-700"
                   style={{ width: `${xpPercent}%` }}
                 />
               </div>
-              <span className="text-xs text-gray-400 whitespace-nowrap">
+              <span className="text-[10px] font-mono text-gray-400 whitespace-nowrap">
                 {user.xp} XP
               </span>
             </div>
           </div>
 
           {/* Stats */}
-          <div className="hidden sm:flex gap-4 text-center flex-shrink-0">
-            <div>
-              <div className="text-xs text-gray-500 mb-0.5">INT</div>
+          <div className="hidden sm:flex gap-4 text-center flex-shrink-0 font-mono">
+            <div className="bg-blue-950/30 px-2 py-1 rounded border border-blue-900/50">
+              <div className="text-[10px] text-blue-500/80 mb-0.5">INT</div>
               <div className="text-sm font-bold text-blue-400">
                 {user.stats.int}
               </div>
             </div>
-            <div>
-              <div className="text-xs text-gray-500 mb-0.5">DEX</div>
-              <div className="text-sm font-bold text-green-400">
+            <div className="bg-emerald-950/30 px-2 py-1 rounded border border-emerald-900/50">
+              <div className="text-[10px] text-emerald-500/80 mb-0.5">DEX</div>
+              <div className="text-sm font-bold text-emerald-400">
                 {user.stats.dex}
               </div>
             </div>
-            <div>
-              <div className="text-xs text-gray-500 mb-0.5">CHA</div>
-              <div className="text-sm font-bold text-yellow-400">
+            <div className="bg-amber-950/30 px-2 py-1 rounded border border-amber-900/50">
+              <div className="text-[10px] text-amber-500/80 mb-0.5">CHA</div>
+              <div className="text-sm font-bold text-amber-400">
                 {user.stats.cha}
               </div>
             </div>
@@ -316,13 +320,13 @@ export default function MarketplacePage() {
                 <button
                   key={f.value}
                   onClick={() => setGradeFilter(f.value)}
-                  className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  className={`flex items-center gap-1.5 px-4 py-2 rounded font-cinzel text-xs font-bold uppercase tracking-widest transition-colors ${
                     gradeFilter === f.value
-                      ? "bg-purple-600 text-white shadow-lg shadow-purple-500/30"
-                      : "bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700"
+                      ? "bg-amber-900/50 text-amber-400 border border-amber-500/50 shadow-[0_0_10px_rgba(217,119,6,0.3)]"
+                      : "bg-gray-900/50 text-gray-500 border border-gray-800 hover:text-amber-200 hover:bg-gray-800"
                   }`}
                 >
-                  <span>{f.icon}</span>
+                  <span className="drop-shadow-sm filter grayscale group-hover:grayscale-0">{f.icon}</span>
                   <span>{f.label}</span>
                 </button>
               ))}
@@ -335,7 +339,7 @@ export default function MarketplacePage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Поиск по имени или навыку..."
-                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white placeholder-gray-500 text-sm"
+                className="w-full px-4 py-2 bg-gray-900/80 border border-gray-700/50 rounded focus:outline-none focus:border-amber-500/50 font-inter text-white placeholder-gray-600 text-sm shadow-inner transition-colors"
               />
             </div>
           </div>

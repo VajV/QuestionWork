@@ -1,13 +1,7 @@
 "use client";
 
-import Card from "@/components/ui/Card";
-import ProgressBar from "@/components/ui/ProgressBar";
-import { Brain, Zap, MessageCircle } from 'lucide-react';
+import { Brain, Zap, MessageCircle, Swords } from 'lucide-react';
 
-/**
- * Интерфейс для статистики пользователя
- * Использует те же имена полей что и API (int, dex, cha)
- */
 interface UserStats {
   int: number;
   dex: number;
@@ -18,98 +12,62 @@ interface StatsPanelProps {
   stats: UserStats;
 }
 
-/**
- * Иконки для каждой характеристики
- */
-const statIcons = {
-  int: Brain,
-  dex: Zap,
-  cha: MessageCircle,
-};
-
-/**
- * Названия характеристик на русском
- */
-const statNames: Record<keyof UserStats, string> = {
-  int: 'Интеллект',
-  dex: 'Ловкость',
-  cha: 'Харизма',
-};
-
-/**
- * Цвета для прогресс-баров каждой характеристики
- */
-const statGradients: Record<keyof UserStats, string> = {
-  int: 'from-blue-400 to-cyan-400',
-  dex: 'from-emerald-400 to-green-400',
-  cha: 'from-amber-400 to-orange-400',
-};
-
-const statGlowClass: Record<keyof UserStats, string> = {
-  int: 'stat-glow-blue',
-  dex: 'stat-glow-emerald',
-  cha: 'stat-glow-amber',
-};
-
-const statColors: Record<keyof UserStats, 'blue' | 'emerald' | 'amber'> = {
-  int: 'blue',
-  dex: 'emerald',
-  cha: 'amber',
-};
-
-/**
- * Компонент панели характеристик
- * 
- * @param props - Пропсы компонента
- * @param props.stats - Объект со статами пользователя из API
- * 
- * @example
- * <StatsPanel stats={{ int: 10, dex: 10, cha: 10 }} />
- */
 export default function StatsPanel({ stats }: StatsPanelProps) {
-  // Максимальный стат для расчёта процента (база = 10, макс = 20 для начала)
+  // Для начала возьмем макс стат 20 для расчета
   const maxStat = 20;
 
   return (
-    <Card className="p-6">
-      <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-        <span>📊</span> Характеристики
+    <div className="rpg-card p-6 mt-6">
+      <h3 className="text-xl font-cinzel text-amber-500 mb-6 border-b border-amber-900/30 pb-2 flex items-center gap-2">
+        <Swords className="text-amber-500" size={24} /> Характеристики
       </h3>
       
-      <div className="space-y-4">
-        {/* Проходим по всем ключам статистики */}
-        {(Object.keys(stats) as Array<keyof UserStats>).map((statKey) => {
-          const IconComponent = statIcons[statKey];
-          return (
-            <div key={statKey} className={`glass-card p-4 flex items-center gap-4 hover:scale-[1.02] transition-transform duration-200 md:gap-6 ${statGlowClass[statKey]}`}>
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center bg-gradient-to-br ${statGradients[statKey]} shadow-lg animate-neon-pulse shrink-0`}>
-                <IconComponent size={20} className="text-white drop-shadow-lg" aria-hidden="true" focusable="false" />
-              </div>
-              
-              <div className="flex-1">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-sm font-semibold text-white/80 uppercase tracking-widest">{statNames[statKey]}</span>
-                  <span className={`text-lg font-bold bg-gradient-to-r ${statGradients[statKey]} bg-clip-text text-transparent ml-auto`}>
-                    {stats[statKey]}
-                  </span>
-                </div>
-                <ProgressBar
-                  value={stats[statKey]}
-                  max={maxStat}
-                  showPercent={false}
-                  color={statColors[statKey]}
-                  className="mt-1"
-                />
-              </div>
+      <div className="space-y-6">
+        <div className="flex items-center gap-4 group">
+          <div className="w-12 h-12 rounded-lg border border-blue-500/30 bg-blue-950/20 flex items-center justify-center shadow-[0_0_10px_rgba(59,130,246,0.2)] group-hover:shadow-[0_0_15px_rgba(59,130,246,0.4)] transition-shadow">
+            <Brain className="text-blue-400" size={24} />
+          </div>
+          <div className="flex-1">
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-sm font-cinzel text-gray-300 uppercase tracking-wider">Интеллект</span>
+              <span className="text-lg font-mono text-blue-400 font-bold">{stats.int}</span>
             </div>
-          );
-        })}
-      </div>
+            <div className="stat-bar mt-2">
+               <div className="stat-bar-fill stat-bar-fill-int h-full shadow-[0_0_10px_rgba(59,130,246,0.5)]" style={{ width: `${Math.min((stats.int / maxStat) * 100, 100)}%` }}></div>
+            </div>
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-4 group">
+          <div className="w-12 h-12 rounded-lg border border-emerald-500/30 bg-emerald-950/20 flex items-center justify-center shadow-[0_0_10px_rgba(16,185,129,0.2)] group-hover:shadow-[0_0_15px_rgba(16,185,129,0.4)] transition-shadow">
+            <Zap className="text-emerald-400" size={24} />
+          </div>
+          <div className="flex-1">
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-sm font-cinzel text-gray-300 uppercase tracking-wider">Ловкость</span>
+              <span className="text-lg font-mono text-emerald-400 font-bold">{stats.dex}</span>
+            </div>
+            <div className="stat-bar mt-2">
+               <div className="stat-bar-fill stat-bar-fill-dex h-full shadow-[0_0_10px_rgba(16,185,129,0.5)]" style={{ width: `${Math.min((stats.dex / maxStat) * 100, 100)}%` }}></div>
+            </div>
+          </div>
+        </div>
 
-      {/* Подсказка для пользователя */}
-      <p className="text-gray-500 text-sm mt-4">
-        💡 Статы растут с выполнением квестов и повышением уровня
-      </p>
-    </Card>
+        <div className="flex items-center gap-4 group">
+          <div className="w-12 h-12 rounded-lg border border-amber-500/30 bg-amber-950/20 flex items-center justify-center shadow-[0_0_10px_rgba(245,158,11,0.2)] group-hover:shadow-[0_0_15px_rgba(245,158,11,0.4)] transition-shadow">
+            <MessageCircle className="text-amber-400" size={24} />
+          </div>
+          <div className="flex-1">
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-sm font-cinzel text-gray-300 uppercase tracking-wider">Харизма</span>
+              <span className="text-lg font-mono text-amber-400 font-bold">{stats.cha}</span>
+            </div>
+            <div className="stat-bar mt-2">
+               <div className="stat-bar-fill stat-bar-fill-cha h-full shadow-[0_0_10px_rgba(245,158,11,0.5)]" style={{ width: `${Math.min((stats.cha / maxStat) * 100, 100)}%` }}></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -130,29 +130,32 @@ export default function QuestsPage() {
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900/20 to-gray-900">
+    <main className="min-h-screen bg-gray-950 text-gray-200 font-inter">
       <Header />
 
       <div className="container mx-auto px-4 py-8">
         {/* Заголовок */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-center mb-4 glow-text">
-            <span className="text-purple-400">📜</span> Лента квестов
+        <div className="text-center mb-10 mt-6">
+          <h1 className="text-4xl font-cinzel font-bold text-amber-500 drop-shadow-[0_0_10px_rgba(217,119,6,0.5)] uppercase tracking-widest mb-2 flex items-center justify-center gap-4">
+            <span className="text-3xl grayscale">📜</span>
+            Доска Заданий
+            <span className="text-3xl grayscale">⚔️</span>
           </h1>
-          <p className="text-gray-400 text-center">
-            Найдите подходящий заказ и заработайте XP + деньги
+          <div className="divider-ornament w-64 mx-auto"></div>
+          <p className="text-gray-400 font-inter mt-4 tracking-wide">
+            Заключайте контракты, получайте золото и возвышайте своё Имя
           </p>
         </div>
 
         {/* Статистика */}
-        <div className="flex items-center justify-between mb-6">
-          <p className="text-gray-400">
-            Найдено квестов:{" "}
-            <span className="text-white font-bold">{total}</span>
+        <div className="flex items-center justify-between mb-6 bg-black/40 border border-purple-900/30 p-4 rounded text-sm font-mono">
+          <p className="text-gray-400 uppercase tracking-widest">
+            Актуальных контрактов:{" "}
+            <span className="text-amber-500 font-bold ml-2">{total}</span>
           </p>
           {filters.status && (
-            <div className="flex items-center gap-2">
-              <span className="text-gray-400 text-sm">Фильтр:</span>
+            <div className="flex items-center gap-3">
+              <span className="text-purple-400 opacity-60 uppercase tracking-wider text-xs">Метка Искателя:</span>
               <QuestStatusBadge status={filters.status} size="sm" />
             </div>
           )}
@@ -163,23 +166,23 @@ export default function QuestsPage() {
 
         {/* Лоадер */}
         {loading && quests.length === 0 && (
-          <Card className="p-12 text-center">
-            <div className="w-16 h-16 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-            <p className="text-gray-400">Загрузка квестов...</p>
+          <Card className="p-12 text-center bg-transparent border-none shadow-none">
+            <div className="w-16 h-16 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-6 shadow-[0_0_15px_rgba(217,119,6,0.5)]" />
+            <p className="text-amber-500/70 font-cinzel uppercase tracking-widest">Чтение древних свитков...</p>
           </Card>
         )}
 
         {/* Ошибка */}
         {error && (
-          <Card className="p-6 mb-6 border-red-500/50">
+          <Card className="p-6 mb-6 border-red-900/50 bg-red-950/20">
             <div className="text-center">
-              <span className="text-4xl mb-2 block">⚠️</span>
-              <h3 className="text-xl font-bold text-red-400 mb-2">
-                Ошибка загрузки
+              <span className="text-5xl mb-4 block drop-shadow-[0_0_15px_rgba(220,38,38,0.8)]">⚠️</span>
+              <h3 className="text-xl font-cinzel font-bold text-red-500 mb-2">
+                Магическая Аномалия
               </h3>
-              <p className="text-gray-400 mb-4">{error}</p>
-              <Button onClick={() => loadQuests(true)} variant="secondary">
-                🔄 Повторить
+              <p className="text-gray-400 mb-6 font-mono text-sm">{error}</p>
+              <Button onClick={() => loadQuests(true)} variant="secondary" className="border-red-900/50 hover:border-red-500/50 text-red-400">
+                🔄 Сотворить заклинание заново
               </Button>
             </div>
           </Card>
@@ -187,20 +190,20 @@ export default function QuestsPage() {
 
         {/* Список квестов */}
         {!loading && quests.length === 0 && !error && (
-          <Card className="p-12 text-center">
-            <span className="text-6xl mb-4 block">📭</span>
-            <h3 className="text-xl font-bold mb-2">Квесты не найдены</h3>
-            <p className="text-gray-400 mb-4">
-              Попробуйте изменить параметры фильтров
+          <Card className="p-12 text-center bg-black/40 border-purple-900/30">
+            <span className="text-6xl mb-6 block opacity-50 grayscale">📭</span>
+            <h3 className="text-2xl font-cinzel font-bold mb-4 text-gray-300">Свитки не найдены</h3>
+            <p className="text-gray-500 mb-8 font-inter">
+              Доска заданий пуста. Возможно, стоит поискать в других землях (изменить фильтры).
             </p>
-            <Button onClick={() => handleFilterChange({})} variant="primary">
-              🔄 Сбросить фильтры
+            <Button onClick={() => handleFilterChange({})} variant="primary" className="shadow-[0_0_15px_rgba(217,119,6,0.2)]">
+              🔄 Очистить условия поиска
             </Button>
           </Card>
         )}
 
         {/* Карточки квестов */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
           {quests.map((quest) => (
             <QuestCard
               key={quest.id}
@@ -217,16 +220,16 @@ export default function QuestsPage() {
 
         {/* Кнопка "Загрузить ещё" */}
         {hasMore && (
-          <div className="text-center mt-8">
+          <div className="text-center mt-12">
             <Button
               onClick={loadMore}
               variant="secondary"
               disabled={loading}
-              className="px-8 py-3"
+              className="px-10 py-3 border-purple-900/50 hover:border-purple-500/50 shadow-[0_0_10px_rgba(88,28,135,0.3)] hover:shadow-[0_0_20px_rgba(168,85,247,0.4)]"
             >
               {loading ? (
-                <span className="flex items-center gap-2">
-                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                <span className="flex items-center gap-3 font-cinzel">
+                  <svg className="animate-spin h-5 w-5 text-amber-500" viewBox="0 0 24 24">
                     <circle
                       className="opacity-25"
                       cx="12"
@@ -242,10 +245,10 @@ export default function QuestsPage() {
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                     />
                   </svg>
-                  Загрузка...
+                  Раскрываем свитки...
                 </span>
               ) : (
-                "📥 Загрузить ещё"
+                "📜 Показать больше записей"
               )}
             </Button>
           </div>

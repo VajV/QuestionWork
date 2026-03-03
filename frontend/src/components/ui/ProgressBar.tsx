@@ -22,28 +22,30 @@ export default function ProgressBar({
   const percent = Math.min((value / max) * 100, 100);
   
   const colorStyles = {
-    purple: 'from-purple-600 to-purple-400 shadow-purple-500/30',
-    green: 'from-green-600 to-green-400 shadow-green-500/30',
-    blue: 'from-blue-600 to-blue-400 shadow-blue-500/30',
-    red: 'from-red-600 to-red-400 shadow-red-500/30', emerald: 'from-emerald-600 to-emerald-400 shadow-emerald-500/30', amber: 'from-amber-600 to-amber-400 shadow-amber-500/30',
+    purple: 'stat-bar-fill-int shadow-purple-500/50',
+    green: 'bg-gradient-to-r from-green-600 to-green-400 shadow-green-500/50',
+    blue: 'stat-bar-fill-int shadow-blue-500/50',
+    red: 'bg-gradient-to-r from-red-600 to-red-400 shadow-red-500/50',
+    emerald: 'stat-bar-fill-dex shadow-emerald-500/50',
+    amber: 'stat-bar-fill-cha shadow-amber-500/50',
   };
 
   return (
     <div className={`w-full ${className}`}>
       {(label || showPercent) && (
-        <div className="flex justify-between text-sm mb-1">
-          {label && <span className="text-gray-300">{label}</span>}
+        <div className="flex justify-between font-mono text-sm mb-1 uppercase tracking-widest text-gray-400">
+          {label && <span>{label}</span>}
           {showPercent && (
-            <span className="text-gray-300">{Math.round(percent)}%</span>
+            <span>{Math.round(percent)}%</span>
           )}
         </div>
       )}
-      <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+      <div className="stat-bar border-gray-700 h-3">
         <motion.div
           initial={{ width: 0 }}
           animate={{ width: `${percent}%` }}
           transition={{ duration: 0.8, ease: "easeOut" }}
-          className={`h-full bg-gradient-to-r ${colorStyles[color]} shadow-lg`}
+          className={`stat-bar-fill ${colorStyles[color]} shadow-[0_0_8px_currentColor]`}
         />
       </div>
     </div>
