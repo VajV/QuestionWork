@@ -14,12 +14,11 @@ import { useAuth } from "@/context/AuthContext";
 import Header from "@/components/layout/Header";
 import LevelBadge from "@/components/rpg/LevelBadge";
 import StatsPanel from "@/components/rpg/StatsPanel";
-import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import { getUserProfile, getMyBadges, UserProfile } from "@/lib/api";
 import type { UserBadgeEarned } from "@/lib/api";
 import BadgeGrid from "@/components/rpg/BadgeGrid";
-import { User, Briefcase, Star, Award } from 'lucide-react';
+import { User, Briefcase, Award } from 'lucide-react';
 
 export default function ProfilePage() {
   const router = useRouter();

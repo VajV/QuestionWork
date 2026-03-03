@@ -124,9 +124,13 @@ async def tracing_middleware(request: Request, call_next):
             response = await call_next(request)
             span.set_attribute("http.status_code", response.status_code)
             return response
-    except Exception:
-        # If OpenTelemetry not available or an error occurs, just call next
+    except ImportError:
+        # OpenTelemetry not installed — bypass tracing
         return await call_next(request)
+    except Exception:
+        # If tracing fails on an already-dispatched request, re-raise
+        # so FastAPI returns error normally. Do NOT call call_next again.
+        raise
 
 
 @app.middleware("http")
