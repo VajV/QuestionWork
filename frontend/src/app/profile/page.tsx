@@ -15,16 +15,20 @@ import Header from "@/components/layout/Header";
 import LevelBadge from "@/components/rpg/LevelBadge";
 import StatsPanel from "@/components/rpg/StatsPanel";
 import Button from "@/components/ui/Button";
-import { getUserProfile, getMyBadges, UserProfile } from "@/lib/api";
-import type { UserBadgeEarned } from "@/lib/api";
+import { getUserProfile, getMyBadges, getMyClass, UserProfile } from "@/lib/api";
+import type { UserBadgeEarned, UserClassInfo } from "@/lib/api";
 import BadgeGrid from "@/components/rpg/BadgeGrid";
-import { User, Briefcase, Award } from 'lucide-react';
+import ClassBadge from "@/components/rpg/ClassBadge";
+import ClassSelector from "@/components/rpg/ClassSelector";
+import { User, Briefcase, Award, Shield } from 'lucide-react';
 
 export default function ProfilePage() {
   const router = useRouter();
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [earnedBadges, setEarnedBadges] = useState<UserBadgeEarned[]>([]);
+  const [classInfo, setClassInfo] = useState<UserClassInfo | null>(null);
+  const [classModalOpen, setClassModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,6 +51,17 @@ export default function ProfilePage() {
       ]);
       setProfile(data);
       setEarnedBadges(badgeData.badges);
+      // Load class info (may 404 if no class selected)
+      if (data.character_class) {
+        try {
+          const ci = await getMyClass();
+          setClassInfo(ci);
+        } catch {
+          setClassInfo(null);
+        }
+      } else {
+        setClassInfo(null);
+      }
     } catch (err) {
       console.error("Ошибка загрузки профиля:", err);
       setError("Не удалось загрузить профиль. Попробуйте позже.");
@@ -174,6 +189,61 @@ export default function ProfilePage() {
 
           {/* Статы */}
           <StatsPanel stats={profile.stats} />
+
+          {/* Класс персонажа */}
+          {profile.role === 'freelancer' && (
+            <div className="rpg-card p-6 mt-6">
+              <h3 className="text-xl font-cinzel text-amber-500 mb-4 flex items-center gap-2 border-b border-amber-900/30 pb-2">
+                <Shield className="text-amber-500" size={24} aria-hidden="true" /> Класс
+              </h3>
+              {classInfo ? (
+                <div className="flex items-center justify-between">
+                  <ClassBadge classInfo={classInfo} size="md" />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => router.push("/profile/class")}
+                      className="text-sm text-gray-400 hover:text-red-400 transition-colors border border-gray-700/50 hover:border-red-500/50 px-3 py-1 rounded"
+                    >
+                      🔮 Перки
+                    </button>
+                    <button
+                      onClick={() => setClassModalOpen(true)}
+                      className="text-sm text-gray-400 hover:text-amber-400 transition-colors border border-gray-700/50 hover:border-amber-500/50 px-3 py-1 rounded"
+                    >
+                      Управление
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-4">
+                  <p className="text-gray-400 mb-3">
+                    {profile.level >= 5
+                      ? "Вы можете выбрать класс персонажа!"
+                      : `Система классов доступна с уровня 5 (ваш: ${profile.level})`}
+                  </p>
+                  {profile.level >= 5 && (
+                    <button
+                      onClick={() => setClassModalOpen(true)}
+                      className="px-4 py-2 bg-gradient-to-r from-amber-700 to-amber-900 text-white font-cinzel rounded border border-amber-500/50 shadow-[0_0_15px_rgba(217,119,6,0.3)] hover:scale-105 transition-all"
+                    >
+                      ⚔️ Выбрать класс
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <ClassSelector
+            isOpen={classModalOpen}
+            onClose={() => setClassModalOpen(false)}
+            userLevel={profile.level}
+            currentClass={profile.character_class}
+            onClassSelected={(ci) => {
+              setClassInfo(ci);
+              loadProfile();
+            }}
+          />
 
           {/* Бейджи */}
           <div className="rpg-card p-6 mt-6">

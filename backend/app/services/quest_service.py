@@ -22,6 +22,7 @@ from app.core.rewards import (
     check_level_up,
     get_grade_level,
 )
+from app.core.classes import should_block_quest
 from app.models.quest import (
     Quest,
     QuestApplication,
@@ -30,7 +31,7 @@ from app.models.quest import (
     QuestListResponse,
     QuestStatusEnum,
 )
-from app.services import wallet_service, badge_service, notification_service
+from app.services import wallet_service, badge_service, notification_service, class_service
 from app.models.user import GradeEnum, UserProfile, row_to_user_profile
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,9 @@ def row_to_quest(row, applications: list[str] | None = None) -> Quest:
         status=QuestStatusEnum(row["status"]),
         applications=applications if applications is not None else [],
         assigned_to=row["assigned_to"],
+        is_urgent=row.get("is_urgent", False),
+        deadline=row.get("deadline"),
+        required_portfolio=row.get("required_portfolio", False),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         completed_at=row["completed_at"],
@@ -178,8 +182,10 @@ async def create_quest(
         """
         INSERT INTO quests (
             id, client_id, client_username, title, description, required_grade,
-            skills, budget, currency, xp_reward, status, created_at, updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+            skills, budget, currency, xp_reward, status,
+            is_urgent, deadline, required_portfolio,
+            created_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
         """,
         quest_id,
         current_user.id,
@@ -192,6 +198,9 @@ async def create_quest(
         quest_data.currency,
         xp_reward,
         QuestStatusEnum.open.value,
+        quest_data.is_urgent,
+        quest_data.deadline,
+        quest_data.required_portfolio,
         now,
         now,
     )
@@ -210,6 +219,9 @@ async def create_quest(
         status=QuestStatusEnum.open,
         applications=[],
         assigned_to=None,
+        is_urgent=quest_data.is_urgent,
+        deadline=quest_data.deadline,
+        required_portfolio=quest_data.required_portfolio,
         created_at=now,
         updated_at=now,
         completed_at=None,
@@ -250,6 +262,11 @@ async def apply_to_quest(
         raise ValueError(
             f"Your grade ({current_user.grade}) is lower than required ({quest_required_grade})"
         )
+
+    # Phase 2: class-based quest blocking (e.g. Berserker can't take portfolio quests)
+    required_portfolio = bool(quest.get("requires_portfolio", False))
+    if should_block_quest(current_user.character_class, required_portfolio=required_portfolio):
+        raise ValueError("Ваш класс не позволяет брать квесты с обязательным портфолио")
 
     application_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
@@ -520,6 +537,15 @@ async def confirm_quest_completion(
                 event_type="badge_earned",
             )
 
+        # 6. Class XP progression (if freelancer has a class)
+        class_result = await class_service.add_class_xp(
+            conn,
+            quest["assigned_to"],
+            xp_reward,
+            is_urgent=quest.get("is_urgent", False),
+            required_portfolio=quest.get("required_portfolio", False),
+        )
+
     logger.info(
         f"Quest {quest_id} confirmed. Freelancer {freelancer_row['username']}: "
         f"+{xp_reward} XP, +{split['freelancer_amount']} {quest['currency']} "
@@ -541,6 +567,8 @@ async def confirm_quest_completion(
             {"id": b.badge_id, "name": b.badge_name, "description": b.badge_description}
             for b in award_result.newly_earned
         ],
+        "class_xp_gained": class_result.get("class_xp_gained", 0),
+        "class_level_up": class_result.get("class_level_up", False),
     }
 
 

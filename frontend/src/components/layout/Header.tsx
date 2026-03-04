@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import NotificationBell from "@/components/layout/NotificationBell";
+import { Shield } from "lucide-react";
 
 export default function Header() {
   const router = useRouter();
@@ -49,6 +50,15 @@ export default function Header() {
                 className="text-purple-400 hover:text-purple-300 transition-colors font-bold drop-shadow-[0_0_5px_rgba(168,85,247,0.5)] flex items-center gap-1"
               >
                 + Создать контракт
+              </Link>
+            )}
+            {isAuthenticated && user?.role === "admin" && (
+              <Link
+                href="/admin/dashboard"
+                className="text-purple-400 hover:text-purple-300 transition-colors font-bold drop-shadow-[0_0_5px_rgba(168,85,247,0.5)] flex items-center gap-1"
+              >
+                <Shield size={14} />
+                Админ
               </Link>
             )}
           </nav>

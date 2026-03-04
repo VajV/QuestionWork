@@ -13,6 +13,21 @@ const API_BASE_URL =
 let ACCESS_TOKEN: string | null = null;
 
 import { triggerLogout } from "@/lib/authEvents";
+import type {
+  AdminUsersResponse,
+  AdminTransactionsResponse,
+  AdminLogsResponse,
+  WithdrawalApproveResult,
+  WithdrawalRejectResult,
+  AdminUserDetail,
+  AdminQuestDetail,
+  AdminPlatformStats,
+  AdminGrantXPResult,
+  AdminAdjustWalletResult,
+  AdminBanResult,
+  AdminUnbanResult,
+  AdminBroadcastResult,
+} from "@/types";
 
 /** Set current access token in memory. Called by AuthContext after login/refresh. */
 export function setAccessToken(token: string | null) {
@@ -75,6 +90,9 @@ export interface Quest {
   status: QuestStatus;
   applications: string[];
   assigned_to: string | null;
+  is_urgent: boolean;
+  deadline: string | null;
+  required_portfolio: boolean;
   created_at: string;
   updated_at: string;
   completed_at?: string;
@@ -122,7 +140,7 @@ export interface UserProfile {
   id: string;
   username: string;
   email: string | null;
-  role: "client" | "freelancer";
+  role: "client" | "freelancer" | "admin";
   level: number;
   grade: UserGrade;
   xp: number;
@@ -131,6 +149,7 @@ export interface UserProfile {
   badges: UserBadge[];
   bio: string | null;
   skills: string[];
+  character_class: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -151,7 +170,7 @@ export interface RegisterData {
   username: string;
   email: string;
   password: string;
-  role: "client" | "freelancer";
+  role: "client" | "freelancer" | "admin";
 }
 
 /**
@@ -232,7 +251,10 @@ async function fetchApi<T>(
     clearTimeout(timeoutId);
 
     // If unauthorized, attempt to refresh using httpOnly refresh cookie.
-    if (response.status === 401) {
+    // Skip this interception for auth endpoints (login/register/refresh) —
+    // a 401 there means bad credentials, not an expired token.
+    const isAuthEndpoint = url.includes("/auth/login") || url.includes("/auth/register") || url.includes("/auth/refresh");
+    if (response.status === 401 && !isAuthEndpoint) {
       // Try refresh endpoint once
       try {
         const refreshResp = await fetch(`${API_BASE_URL}/auth/refresh`, {
@@ -274,7 +296,7 @@ async function fetchApi<T>(
         triggerLogout();
       }
 
-      throw new Response("Unauthorized: Token invalid or expired", {
+      throw new Response("Сессия истекла. Пожалуйста, войдите снова.", {
         status: 401,
         statusText: "Unauthorized",
       });
@@ -690,6 +712,376 @@ export async function getUserBadges(userId: string): Promise<{
 }
 
 // ============================================
+// Character Class types
+// ============================================
+
+export interface ClassBonusInfo {
+  key: string;
+  label: string;
+  value: number | boolean;
+  is_weakness: boolean;
+}
+
+export interface CharacterClassInfo {
+  class_id: string;
+  name: string;
+  name_ru: string;
+  icon: string;
+  color: string;
+  description: string;
+  description_ru: string;
+  min_unlock_level: number;
+  bonuses: ClassBonusInfo[];
+  weaknesses: ClassBonusInfo[];
+  perk_count: number;
+  ability_count: number;
+}
+
+export interface UserClassInfo {
+  class_id: string;
+  name: string;
+  name_ru: string;
+  icon: string;
+  color: string;
+  class_level: number;
+  class_xp: number;
+  class_xp_to_next: number;
+  quests_completed_as_class: number;
+  consecutive_quests: number;
+  is_trial: boolean;
+  trial_expires_at: string | null;
+  active_bonuses: ClassBonusInfo[];
+  weaknesses: ClassBonusInfo[];
+  is_burnout: boolean;
+  burnout_until: string | null;
+  // Phase 2
+  perk_points_total: number;
+  perk_points_spent: number;
+  perk_points_available: number;
+  unlocked_perks: string[];
+  rage_active: boolean;
+  rage_active_until: string | null;
+}
+
+export interface ClassListResponse {
+  classes: CharacterClassInfo[];
+  user_level: number;
+  current_class: string | null;
+}
+
+export interface ClassSelectResponse {
+  message: string;
+  class_info: UserClassInfo;
+}
+
+// ============================================
+// Class API functions
+// ============================================
+
+export async function getClasses(): Promise<ClassListResponse> {
+  return fetchApi<ClassListResponse>(`/classes/`, {}, true);
+}
+
+export async function getMyClass(): Promise<UserClassInfo> {
+  return fetchApi<UserClassInfo>(`/classes/me`, {}, true);
+}
+
+export async function selectClass(classId: string): Promise<ClassSelectResponse> {
+  return fetchApi<ClassSelectResponse>(
+    `/classes/select`,
+    { method: "POST", body: JSON.stringify({ class_id: classId }) },
+    true,
+  );
+}
+
+export async function confirmClass(): Promise<ClassSelectResponse> {
+  return fetchApi<ClassSelectResponse>(
+    `/classes/confirm`,
+    { method: "POST" },
+    true,
+  );
+}
+
+export async function resetClass(): Promise<{ message: string }> {
+  return fetchApi<{ message: string }>(
+    `/classes/reset`,
+    { method: "POST" },
+    true,
+  );
+}
+
+// ============================================
+// Phase 2: Perk & Ability types
+// ============================================
+
+export interface PerkInfo {
+  perk_id: string;
+  name: string;
+  name_ru: string;
+  description_ru: string;
+  icon: string;
+  tier: number;
+  required_class_level: number;
+  perk_point_cost: number;
+  prerequisite_ids: string[];
+  effects: Record<string, number | boolean>;
+  is_unlocked: boolean;
+  can_unlock: boolean;
+  lock_reason: string | null;
+}
+
+export interface PerkTreeResponse {
+  class_id: string;
+  perks: PerkInfo[];
+  perk_points_total: number;
+  perk_points_spent: number;
+  perk_points_available: number;
+}
+
+export interface PerkUnlockResponse {
+  message: string;
+  perk: PerkInfo;
+  perk_points_available: number;
+}
+
+export interface AbilityInfo {
+  ability_id: string;
+  name: string;
+  name_ru: string;
+  description_ru: string;
+  icon: string;
+  required_class_level: number;
+  cooldown_hours: number;
+  duration_hours: number;
+  effects: Record<string, number | boolean>;
+  is_unlocked: boolean;
+  is_active: boolean;
+  active_until: string | null;
+  is_on_cooldown: boolean;
+  cooldown_until: string | null;
+  times_used: number;
+}
+
+export interface AbilityActivateResponse {
+  message: string;
+  ability: AbilityInfo;
+}
+
+// ============================================
+// Phase 2: Perk & Ability API functions
+// ============================================
+
+export async function getPerkTree(): Promise<PerkTreeResponse> {
+  return fetchApi<PerkTreeResponse>(`/classes/perks`, {}, true);
+}
+
+export async function unlockPerk(perkId: string): Promise<PerkUnlockResponse> {
+  return fetchApi<PerkUnlockResponse>(
+    `/classes/perks/unlock`,
+    { method: "POST", body: JSON.stringify({ perk_id: perkId }) },
+    true,
+  );
+}
+
+export async function getAbilities(): Promise<AbilityInfo[]> {
+  return fetchApi<AbilityInfo[]>(`/classes/abilities`, {}, true);
+}
+
+export async function activateAbility(abilityId: string): Promise<AbilityActivateResponse> {
+  return fetchApi<AbilityActivateResponse>(
+    `/classes/abilities/activate`,
+    { method: "POST", body: JSON.stringify({ ability_id: abilityId }) },
+    true,
+  );
+}
+
+// ============================================
+// Admin API
+// ============================================
+
+/** GET /admin/users — paginated user list */
+export async function adminGetUsers(
+  page = 1,
+  pageSize = 50,
+  role?: string,
+): Promise<AdminUsersResponse> {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  if (role) params.set("role", role);
+  return fetchApi<AdminUsersResponse>(`/admin/users?${params}`, undefined, true);
+}
+
+/** GET /admin/transactions — filtered transaction list */
+export async function adminGetTransactions(
+  page = 1,
+  pageSize = 50,
+  filters?: { status?: string; type?: string; user_id?: string },
+): Promise<AdminTransactionsResponse> {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  if (filters?.status) params.set("status", filters.status);
+  if (filters?.type) params.set("type", filters.type);
+  if (filters?.user_id) params.set("user_id", filters.user_id);
+  return fetchApi<AdminTransactionsResponse>(`/admin/transactions?${params}`, undefined, true);
+}
+
+/** GET /admin/withdrawals/pending — pending withdrawal queue */
+export async function adminGetPendingWithdrawals(
+  page = 1,
+  pageSize = 50,
+): Promise<AdminTransactionsResponse> {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  return fetchApi<AdminTransactionsResponse>(`/admin/withdrawals/pending?${params}`, undefined, true);
+}
+
+/** PATCH /admin/withdrawals/:id/approve */
+export async function adminApproveWithdrawal(
+  transactionId: string,
+): Promise<WithdrawalApproveResult> {
+  return fetchApi<WithdrawalApproveResult>(
+    `/admin/withdrawals/${transactionId}/approve`,
+    { method: "PATCH" },
+    true,
+  );
+}
+
+/** PATCH /admin/withdrawals/:id/reject */
+export async function adminRejectWithdrawal(
+  transactionId: string,
+  reason: string,
+): Promise<WithdrawalRejectResult> {
+  return fetchApi<WithdrawalRejectResult>(
+    `/admin/withdrawals/${transactionId}/reject`,
+    { method: "PATCH", body: JSON.stringify({ reason }) },
+    true,
+  );
+}
+
+/** GET /admin/logs — audit log history */
+export async function adminGetLogs(
+  page = 1,
+  pageSize = 50,
+  adminId?: string,
+): Promise<AdminLogsResponse> {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  if (adminId) params.set("admin_id", adminId);
+  return fetchApi<AdminLogsResponse>(`/admin/logs?${params}`, undefined, true);
+}
+
+/** POST /admin/maintenance/cleanup-notifications */
+export async function adminCleanupNotifications(): Promise<{
+  deleted: number;
+  message: string;
+}> {
+  return fetchApi(`/admin/maintenance/cleanup-notifications`, { method: "POST" }, true);
+}
+
+
+// ============================================
+// Admin God Mode
+// ============================================
+
+/** GET /admin/stats — Platform-wide statistics */
+export async function adminGetPlatformStats(): Promise<AdminPlatformStats> {
+  return fetchApi<AdminPlatformStats>("/admin/stats", undefined, true);
+}
+
+/** GET /admin/users/:id — Full user detail */
+export async function adminGetUserDetail(userId: string): Promise<AdminUserDetail> {
+  return fetchApi<AdminUserDetail>(`/admin/users/${userId}`, undefined, true);
+}
+
+/** PATCH /admin/users/:id — Edit user fields */
+export async function adminUpdateUser(userId: string, data: Record<string, unknown>): Promise<{ user_id: string; updated_fields: string[] }> {
+  return fetchApi(`/admin/users/${userId}`, { method: "PATCH", body: JSON.stringify(data) }, true);
+}
+
+/** POST /admin/users/:id/ban */
+export async function adminBanUser(userId: string, reason: string): Promise<AdminBanResult> {
+  return fetchApi<AdminBanResult>(`/admin/users/${userId}/ban`, { method: "POST", body: JSON.stringify({ reason }) }, true);
+}
+
+/** POST /admin/users/:id/unban */
+export async function adminUnbanUser(userId: string): Promise<AdminUnbanResult> {
+  return fetchApi<AdminUnbanResult>(`/admin/users/${userId}/unban`, { method: "POST" }, true);
+}
+
+/** DELETE /admin/users/:id */
+export async function adminDeleteUser(userId: string): Promise<{ user_id: string; username: string; deleted: boolean }> {
+  return fetchApi(`/admin/users/${userId}`, { method: "DELETE" }, true);
+}
+
+/** POST /admin/users/:id/grant-xp */
+export async function adminGrantXP(userId: string, amount: number, reason: string): Promise<AdminGrantXPResult> {
+  return fetchApi<AdminGrantXPResult>(`/admin/users/${userId}/grant-xp`, { method: "POST", body: JSON.stringify({ amount, reason }) }, true);
+}
+
+/** POST /admin/users/:id/adjust-wallet */
+export async function adminAdjustWallet(userId: string, amount: number, currency: string, reason: string): Promise<AdminAdjustWalletResult> {
+  return fetchApi<AdminAdjustWalletResult>(`/admin/users/${userId}/adjust-wallet`, { method: "POST", body: JSON.stringify({ amount, currency, reason }) }, true);
+}
+
+/** POST /admin/users/:id/grant-badge */
+export async function adminGrantBadge(userId: string, badgeId: string): Promise<{ user_id: string; badge_id: string; badge_name: string }> {
+  return fetchApi(`/admin/users/${userId}/grant-badge`, { method: "POST", body: JSON.stringify({ badge_id: badgeId }) }, true);
+}
+
+/** DELETE /admin/users/:id/badges/:badgeId */
+export async function adminRevokeBadge(userId: string, badgeId: string): Promise<{ user_id: string; badge_id: string; revoked: boolean }> {
+  return fetchApi(`/admin/users/${userId}/badges/${badgeId}`, { method: "DELETE" }, true);
+}
+
+/** POST /admin/users/:id/change-class */
+export async function adminChangeUserClass(userId: string, classId: string | null): Promise<{ user_id: string; old_class: string | null; new_class: string | null }> {
+  return fetchApi(`/admin/users/${userId}/change-class`, { method: "POST", body: JSON.stringify({ class_id: classId }) }, true);
+}
+
+/** GET /admin/quests/:id — Full quest detail */
+export async function adminGetQuestDetail(questId: string): Promise<AdminQuestDetail> {
+  return fetchApi<AdminQuestDetail>(`/admin/quests/${questId}`, undefined, true);
+}
+
+/** PATCH /admin/quests/:id — Edit quest fields */
+export async function adminUpdateQuest(questId: string, data: Record<string, unknown>): Promise<{ quest_id: string; updated_fields: string[] }> {
+  return fetchApi(`/admin/quests/${questId}`, { method: "PATCH", body: JSON.stringify(data) }, true);
+}
+
+/** POST /admin/quests/:id/force-cancel */
+export async function adminForceCancel(questId: string, reason: string): Promise<{ quest_id: string; old_status: string; new_status: string; reason: string }> {
+  return fetchApi(`/admin/quests/${questId}/force-cancel`, { method: "POST", body: JSON.stringify({ reason }) }, true);
+}
+
+/** POST /admin/quests/:id/force-complete */
+export async function adminForceComplete(questId: string, reason: string): Promise<{ quest_id: string; old_status: string; new_status: string; reason: string }> {
+  return fetchApi(`/admin/quests/${questId}/force-complete`, { method: "POST", body: JSON.stringify({ reason }) }, true);
+}
+
+/** DELETE /admin/quests/:id */
+export async function adminDeleteQuest(questId: string): Promise<{ quest_id: string; title: string; deleted: boolean }> {
+  return fetchApi(`/admin/quests/${questId}`, { method: "DELETE" }, true);
+}
+
+/** POST /admin/notifications/broadcast */
+export async function adminBroadcastNotification(
+  userIds: string[], title: string, message: string, eventType?: string
+): Promise<AdminBroadcastResult> {
+  return fetchApi<AdminBroadcastResult>("/admin/notifications/broadcast", {
+    method: "POST",
+    body: JSON.stringify({ user_ids: userIds, title, message, event_type: eventType || "admin_broadcast" }),
+  }, true);
+}
+
+// ============================================
 // Экспорт по умолчанию
 // ============================================
 
@@ -721,6 +1113,43 @@ const api = {
   getBadgeCatalogue,
   getMyBadges,
   getUserBadges,
+  // Classes
+  getClasses,
+  getMyClass,
+  selectClass,
+  confirmClass,
+  resetClass,
+  // Phase 2: Perks & Abilities
+  getPerkTree,
+  unlockPerk,
+  getAbilities,
+  activateAbility,
+  // Admin
+  adminGetUsers,
+  adminGetTransactions,
+  adminGetPendingWithdrawals,
+  adminApproveWithdrawal,
+  adminRejectWithdrawal,
+  adminGetLogs,
+  adminCleanupNotifications,
+  // Admin God Mode
+  adminGetPlatformStats,
+  adminGetUserDetail,
+  adminUpdateUser,
+  adminBanUser,
+  adminUnbanUser,
+  adminDeleteUser,
+  adminGrantXP,
+  adminAdjustWallet,
+  adminGrantBadge,
+  adminRevokeBadge,
+  adminChangeUserClass,
+  adminGetQuestDetail,
+  adminUpdateQuest,
+  adminForceCancel,
+  adminForceComplete,
+  adminDeleteQuest,
+  adminBroadcastNotification,
 };
 
 export default api;

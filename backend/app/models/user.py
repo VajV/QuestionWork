@@ -54,6 +54,7 @@ class UserProfile(BaseModel):
     badges: List[UserBadge] = Field(default_factory=list)
     bio: Optional[str] = Field(None, max_length=500)
     skills: List[str] = Field(default_factory=list)
+    character_class: Optional[str] = Field(None, description="RPG character class (e.g. berserk)")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     class Config:
@@ -121,6 +122,7 @@ def row_to_user_profile(row) -> UserProfile:
         badges=json.loads(row["badges"]) if row["badges"] else [],
         bio=row["bio"],
         skills=json.loads(row["skills"]) if row["skills"] else [],
+        character_class=row.get("character_class"),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )

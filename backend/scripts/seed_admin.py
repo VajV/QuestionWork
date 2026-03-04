@@ -34,7 +34,7 @@ except ImportError:
 
 import asyncpg
 from app.core.config import settings
-from app.core.security import hash_password
+from app.core.security import get_password_hash as hash_password
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("seed_admin")

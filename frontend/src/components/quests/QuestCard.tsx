@@ -8,7 +8,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { Quest } from "@/lib/api";
 import QuestStatusBadge from "./QuestStatusBadge";
-import { Coins, Sparkles, Send, CheckCircle2, Clock, CheckCheck, XCircle } from 'lucide-react';
+import { Coins, Sparkles, Send, CheckCircle2, Clock, CheckCheck, XCircle, Flame } from 'lucide-react';
 
 interface QuestCardProps {
   quest: Quest;
@@ -38,7 +38,12 @@ export default function QuestCard({
       <div className="flex justify-between items-start mb-4 relative z-10">
         <div className="flex-1 pr-4">
           <Link href={`/quests/${quest.id}`}>
-            <h3 className="text-xl font-cinzel text-amber-500 mb-1 group-hover:text-amber-400 transition-colors dropdown-shadow cursor-pointer">
+            <h3 className="text-xl font-cinzel text-amber-500 mb-1 group-hover:text-amber-400 transition-colors dropdown-shadow cursor-pointer flex items-center gap-2">
+              {quest.is_urgent && (
+                <span className="inline-flex items-center gap-1 text-xs bg-red-900/40 text-red-400 border border-red-500/40 px-2 py-0.5 rounded font-mono">
+                  <Flame size={12} /> СРОЧНЫЙ
+                </span>
+              )}
               {quest.title}
             </h3>
           </Link>

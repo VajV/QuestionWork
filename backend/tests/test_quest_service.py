@@ -348,6 +348,7 @@ class TestConfirmQuestCompletion:
             freelancer,
             None,  # freelancer wallet → INSERT path in split_payment
             None,  # platform wallet → INSERT path
+            {"character_class": None},  # class_service.add_class_xp → user has no class
         ]
 
         class _FakeTransaction:

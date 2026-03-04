@@ -40,6 +40,12 @@ async def get_current_user(
         row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
 
     if row:
+        # Check ban status
+        if row.get("is_banned"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is banned",
+            )
         user = row_to_user_profile(row)
         logger.debug(f"Authenticated: {user.username} ({user.id})")
         return user

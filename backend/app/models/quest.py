@@ -50,7 +50,12 @@ class Quest(BaseModel):
     applications: List[str] = Field(default_factory=list, description="ID откликнувшихся фрилансеров")
     assigned_to: Optional[str] = Field(None, description="ID исполнителя (если выбран)")
     
-    # Метаданные
+    # Метаданные квеста
+    is_urgent: bool = Field(default=False, description="Срочный квест (ускоренный дедлайн)")
+    deadline: Optional[datetime] = Field(None, description="Дедлайн выполнения")
+    required_portfolio: bool = Field(default=False, description="Требуется портфолио")
+
+    # Таймстемпы
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: Optional[datetime] = Field(None, description="Дата завершения")
@@ -72,6 +77,9 @@ class QuestCreate(BaseModel):
     budget: float = Field(..., description="Бюджет квеста", ge=100, le=1_000_000)
     currency: Literal["USD", "EUR", "RUB"] = Field(default="RUB", description="Валюта (USD, EUR, RUB)")
     xp_reward: Optional[int] = Field(None, description="Награда в XP (авто-расчёт если не указан)")
+    is_urgent: bool = Field(default=False, description="Срочный квест")
+    deadline: Optional[datetime] = Field(None, description="Дедлайн выполнения")
+    required_portfolio: bool = Field(default=False, description="Требуется портфолио")
 
     @field_validator("skills")
     @classmethod

@@ -85,6 +85,31 @@ export default function CreateQuestPage() {
 
   if (!isAuthenticated) return null;
 
+  // Only clients can create quests
+  if (user?.role !== "client") {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900/20 to-gray-900">
+        <Header />
+        <div className="flex items-center justify-center min-h-[80vh]">
+          <div className="text-center max-w-md px-6">
+            <div className="text-6xl mb-6">🚫</div>
+            <h2 className="text-2xl font-bold text-white mb-3">Только для клиентов</h2>
+            <p className="text-gray-400 mb-6">
+              Создавать квесты могут только пользователи с ролью <span className="text-purple-400 font-semibold">Клиент</span>.
+              Фрилансеры находят и берут уже существующие квесты.
+            </p>
+            <Link
+              href="/quests"
+              className="inline-block bg-purple-600 hover:bg-purple-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
+            >
+              Смотреть квесты
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   // ─── Helpers ────────────────────────────────────────────────────────────────
 
   const updateField = <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -168,7 +193,13 @@ export default function CreateQuestPage() {
       setTimeout(() => router.push(`/quests/${quest.id}`), 1500);
     } catch (err) {
       console.error("Quest creation error:", err);
-      setError("Не удалось создать квест. Проверьте данные и попробуйте ещё раз.");
+      let msg = "Не удалось создать квест. Проверьте данные и попробуйте ещё раз.";
+      if (err instanceof Response) {
+        msg = err.statusText || msg;
+      } else if (err instanceof Error) {
+        msg = err.message;
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }
