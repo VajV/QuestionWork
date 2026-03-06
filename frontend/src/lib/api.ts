@@ -573,6 +573,264 @@ export async function getQuestApplications(
 }
 
 // ============================================
+// Wallet API
+// ============================================
+
+export interface WalletBalanceItem {
+  currency: string;
+  balance: number;
+}
+
+export interface WalletBalanceResponse {
+  user_id: string;
+  balances: WalletBalanceItem[];
+  total_earned?: number;
+}
+
+export interface WalletTransaction {
+  id: string;
+  user_id: string;
+  quest_id: string | null;
+  amount: number;
+  currency: string;
+  type: string;
+  status?: "pending" | "completed" | "rejected";
+  created_at: string;
+}
+
+export interface WalletTransactionsResponse {
+  user_id: string;
+  transactions: WalletTransaction[];
+  limit: number;
+  offset: number;
+}
+
+export interface WithdrawalResponse {
+  transaction_id: string;
+  amount: number;
+  currency: string;
+  status: string;
+  new_balance: number;
+}
+
+export async function getWalletBalance(): Promise<WalletBalanceResponse> {
+  return fetchApi<WalletBalanceResponse>("/wallet/balance", undefined, true);
+}
+
+export async function getWalletTransactions(
+  limit = 50,
+  offset = 0,
+): Promise<WalletTransactionsResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  return fetchApi<WalletTransactionsResponse>(
+    `/wallet/transactions?${params}`,
+    undefined,
+    true,
+  );
+}
+
+export async function requestWithdrawal(
+  amount: number,
+  currency = "RUB",
+): Promise<WithdrawalResponse> {
+  return fetchApi<WithdrawalResponse>(
+    "/wallet/withdraw",
+    {
+      method: "POST",
+      body: JSON.stringify({ amount, currency }),
+    },
+    true,
+  );
+}
+
+// ============================================
+// Reviews API
+// ============================================
+
+export interface Review {
+  id: string;
+  quest_id: string;
+  reviewer_id: string;
+  reviewer_username?: string | null;
+  reviewee_id: string;
+  rating: number;
+  comment?: string | null;
+  created_at: string;
+  xp_bonus?: number;
+}
+
+export interface UserReviewsResponse {
+  reviews: Review[];
+  total: number;
+  avg_rating: number | null;
+  review_count: number;
+}
+
+export interface CreateReviewPayload {
+  quest_id: string;
+  reviewee_id: string;
+  rating: number;
+  comment?: string;
+}
+
+export async function createReview(payload: CreateReviewPayload): Promise<Review> {
+  return fetchApi<Review>(
+    "/reviews/",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    true,
+  );
+}
+
+export async function getUserReviews(
+  userId: string,
+  limit = 20,
+  offset = 0,
+): Promise<UserReviewsResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  return fetchApi<UserReviewsResponse>(`/reviews/user/${userId}?${params}`, undefined, false);
+}
+
+// ============================================
+// Quest Messages API
+// ============================================
+
+export interface QuestMessage {
+  id: string;
+  quest_id: string;
+  author_id: string;
+  author_username?: string | null;
+  text: string;
+  created_at: string;
+}
+
+export interface QuestMessageListResponse {
+  messages: QuestMessage[];
+  total: number;
+}
+
+export async function getQuestMessages(
+  questId: string,
+  limit = 50,
+  before?: string,
+): Promise<QuestMessageListResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (before) params.set("before", before);
+  return fetchApi<QuestMessageListResponse>(
+    `/messages/${questId}?${params}`,
+    undefined,
+    true,
+  );
+}
+
+export async function sendQuestMessage(
+  questId: string,
+  body: { text: string },
+): Promise<QuestMessage> {
+  return fetchApi<QuestMessage>(
+    `/messages/${questId}`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+    true,
+  );
+}
+
+// ============================================
+// Quest Templates API
+// ============================================
+
+export interface QuestTemplate {
+  id: string;
+  owner_id: string;
+  name: string;
+  title: string;
+  description: string;
+  required_grade: UserGrade;
+  skills: string[];
+  budget: number;
+  currency: string;
+  is_urgent: boolean;
+  required_portfolio: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TemplateListResponse {
+  templates: QuestTemplate[];
+  total: number;
+}
+
+export interface CreateTemplatePayload {
+  name: string;
+  title: string;
+  description?: string;
+  required_grade?: string;
+  skills?: string[];
+  budget?: number;
+  currency?: string;
+  is_urgent?: boolean;
+  required_portfolio?: boolean;
+}
+
+export async function getTemplates(
+  limit = 50,
+  offset = 0,
+): Promise<TemplateListResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  return fetchApi<TemplateListResponse>(`/templates/?${params}`, undefined, true);
+}
+
+export async function createTemplate(
+  payload: CreateTemplatePayload,
+): Promise<QuestTemplate> {
+  return fetchApi<QuestTemplate>(
+    "/templates/",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    true,
+  );
+}
+
+export async function deleteTemplate(templateId: string): Promise<void> {
+  await fetchApi<void>(`/templates/${templateId}`, { method: "DELETE" }, true);
+}
+
+export async function createQuestFromTemplate(
+  templateId: string,
+  overrides?: {
+    title?: string;
+    description?: string;
+    budget?: number;
+    is_urgent?: boolean;
+    deadline?: string;
+  },
+): Promise<Quest> {
+  return fetchApi<Quest>(
+    `/templates/${templateId}/create-quest`,
+    {
+      method: "POST",
+      body: JSON.stringify(overrides ?? {}),
+    },
+    true,
+  );
+}
+
+// ============================================
 // Badges & Notifications
 // ============================================
 

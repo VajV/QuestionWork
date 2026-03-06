@@ -20,7 +20,12 @@ import type { UserBadgeEarned, UserClassInfo } from "@/lib/api";
 import BadgeGrid from "@/components/rpg/BadgeGrid";
 import ClassBadge from "@/components/rpg/ClassBadge";
 import ClassSelector from "@/components/rpg/ClassSelector";
-import { User, Briefcase, Award, Shield } from 'lucide-react';
+import { User, Briefcase, Award, Shield, Star } from 'lucide-react';
+import dynamic from "next/dynamic";
+
+// Client-only: make API calls → skip SSR to avoid hydration mismatch
+const WalletPanel = dynamic(() => import("@/components/rpg/WalletPanel"), { ssr: false });
+const ReviewList = dynamic(() => import("@/components/rpg/ReviewList"), { ssr: false });
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -245,6 +250,9 @@ export default function ProfilePage() {
             }}
           />
 
+          {/* Кошелёк */}
+          <WalletPanel />
+
           {/* Бейджи */}
           <div className="rpg-card p-6 mt-6">
             <h3 className="text-xl font-cinzel text-amber-500 mb-4 flex items-center gap-2 border-b border-amber-900/30 pb-2">
@@ -252,6 +260,16 @@ export default function ProfilePage() {
             </h3>
             <BadgeGrid badges={earnedBadges} />
           </div>
+
+          {/* Отзывы (только для фрилансеров) */}
+          {profile.role === "freelancer" && (
+            <div className="rpg-card p-6 mt-6">
+              <h3 className="text-xl font-cinzel text-amber-500 mb-4 flex items-center gap-2 border-b border-amber-900/30 pb-2">
+                <Star className="text-amber-500" size={24} aria-hidden="true" /> Отзывы
+              </h3>
+              <ReviewList userId={profile.id} />
+            </div>
+          )}
 
           {/* Навигация */}
           <div className="flex gap-4 mt-6">

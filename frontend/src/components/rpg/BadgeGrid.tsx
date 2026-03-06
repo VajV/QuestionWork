@@ -58,10 +58,11 @@ function BadgeCard({
   badge: UserBadgeEarned;
   showDate: boolean;
 }) {
-  const earnedDate = new Date(b.earned_at).toLocaleDateString(undefined, {
+  const earnedDate = new Date(b.earned_at).toLocaleDateString("ru-RU", {
     year: "numeric",
     month: "short",
     day: "numeric",
+    timeZone: "UTC",
   });
 
   return (

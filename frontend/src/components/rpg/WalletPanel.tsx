@@ -25,8 +25,12 @@ import {
   CheckCircle,
   XCircle,
 } from "lucide-react";
-import { getWalletBalance, getWalletTransactions, requestWithdrawal } from "@/lib/api";
-import type { WalletTransaction } from "@/types";
+import {
+  getWalletBalance,
+  getWalletTransactions,
+  requestWithdrawal,
+  type WalletTransaction,
+} from "@/lib/api";
 import {
   type CurrencyCode,
   CURRENCY_LIST,
@@ -73,8 +77,9 @@ export default function WalletPanel() {
     try {
       const data = await getWalletBalance();
       const rubEntry = data.balances.find((b) => b.currency === "RUB");
-      setBalanceRUB(rubEntry?.balance ?? 0);
-      setTotalEarned(data.total_earned);
+      // Use Number() coercion: asyncpg Decimal may serialize as string; ?? 0 won't catch NaN
+      setBalanceRUB(Number(rubEntry?.balance) || 0);
+      setTotalEarned(Number(data.total_earned) || 0);
     } catch {
       setError("Не удалось загрузить кошелёк");
     } finally {
@@ -362,6 +367,7 @@ export default function WalletPanel() {
                             day: "2-digit",
                             month: "short",
                             year: "numeric",
+                            timeZone: "UTC",
                           })}
                         </span>
                       </div>

@@ -238,7 +238,7 @@ export default function ClassSelector({
                   <div className="mt-3 p-2 rounded bg-orange-900/20 border border-orange-500/30 text-orange-400 text-xs flex items-center gap-2">
                     <AlertTriangle size={14} />
                     Выгорание активно до{" "}
-                    {new Date(myClassInfo.burnout_until!).toLocaleString("ru")}
+                    {new Date(myClassInfo.burnout_until!).toLocaleString("ru-RU", { timeZone: "UTC" })}
                   </div>
                 )}
               </div>

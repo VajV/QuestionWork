@@ -45,6 +45,7 @@ export default function ReviewList({ userId, pageSize = 10 }: ReviewListProps) {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
 
   const load = useCallback(
     async (offset: number, append: boolean) => {
@@ -67,6 +68,18 @@ export default function ReviewList({ userId, pageSize = 10 }: ReviewListProps) {
   useEffect(() => {
     load(0, false);
   }, [load]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const formatStableDate = (iso: string) =>
+    new Date(iso).toLocaleDateString("ru-RU", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      timeZone: "UTC",
+    });
 
   if (loading) {
     return (
@@ -109,7 +122,7 @@ export default function ReviewList({ userId, pageSize = 10 }: ReviewListProps) {
               <StarRow rating={r.rating} />
             </div>
             <span className="text-[10px] text-gray-500 shrink-0 whitespace-nowrap">
-              {timeAgo(r.created_at)}
+              {mounted ? timeAgo(r.created_at) : formatStableDate(r.created_at)}
             </span>
           </div>
           {r.comment && (
