@@ -96,16 +96,17 @@ def upgrade() -> None:
     pwd_freelancer = bcrypt.hashpw(_default_freelancer_pwd.encode(), bcrypt.gensalt()).decode("utf-8")
     pwd_client = bcrypt.hashpw(_default_client_pwd.encode(), bcrypt.gensalt()).decode("utf-8")
 
-    # NOTE: These seed users are for development/testing only.
-    # In production, set SEED_FREELANCER_PASSWORD / SEED_CLIENT_PASSWORD env vars
-    # or remove this INSERT block entirely.
-
-    op.execute(f"""
-    INSERT INTO users (id, username, email, password_hash, role, level, grade, xp, xp_to_next, stats_int, stats_dex, stats_cha, badges, bio, skills, created_at, updated_at)
-    VALUES
-    ('user_123456', 'novice_dev', 'novice@example.com', '{pwd_freelancer}', 'freelancer', 1, 'novice', 0, 100, 10, 10, 10, '[]', NULL, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-    ('user_client_001', 'client_user', 'client@example.com', '{pwd_client}', 'client', 1, 'novice', 0, 100, 10, 10, 10, '[]', NULL, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
-    """)
+    # NOTE: Seed users are for development/testing only.
+    # Skipped when APP_ENV=production.
+    _app_env = os.environ.get("APP_ENV", "development").lower()
+    if _app_env not in ("production", "prod"):
+        op.execute(f"""
+        INSERT INTO users (id, username, email, password_hash, role, level, grade, xp, xp_to_next, stats_int, stats_dex, stats_cha, badges, bio, skills, created_at, updated_at)
+        VALUES
+        ('user_123456', 'novice_dev', 'novice@example.com', '{pwd_freelancer}', 'freelancer', 1, 'novice', 0, 100, 10, 10, 10, '[]', NULL, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('user_client_001', 'client_user', 'client@example.com', '{pwd_client}', 'client', 1, 'novice', 0, 100, 10, 10, 10, '[]', NULL, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT DO NOTHING;
+        """)
 
 
 def downgrade() -> None:

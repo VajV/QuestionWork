@@ -139,10 +139,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         console.error("Ошибка входа:", error);
 
         let errorMessage = "Не удалось войти";
-        if (error instanceof Response) {
-          // fetchApi throws Response objects; statusText holds the API error detail
-          errorMessage = error.statusText || errorMessage;
-        } else if (error instanceof Error) {
+        if (error instanceof Error) {
           errorMessage = error.message;
         } else if (
           typeof error === "object" &&
@@ -183,9 +180,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         console.error("Ошибка регистрации:", error);
 
         let errorMessage = "Не удалось зарегистрироваться";
-        if (error instanceof Response) {
-          errorMessage = error.statusText || errorMessage;
-        } else if (error instanceof Error) {
+        if (error instanceof Error) {
           errorMessage = error.message;
         } else if (
           typeof error === "object" &&

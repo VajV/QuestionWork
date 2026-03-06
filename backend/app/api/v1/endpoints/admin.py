@@ -322,9 +322,12 @@ async def admin_totp_setup(
         issuer_name="QuestionWork Admin",
     )
 
+    from app.core.security import encrypt_totp_secret
+    encrypted = encrypt_totp_secret(secret)
+
     await conn.execute(
         "UPDATE users SET totp_secret = $1 WHERE id = $2",
-        secret,
+        encrypted,
         current_admin.id,
     )
     logger.info(f"Admin {current_admin.id} generated new TOTP secret")

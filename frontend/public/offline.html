@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuestionWork — Нет подключения</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0d1117;
+      color: #e0e0e0;
+      font-family: system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      gap: 1.5rem;
+      padding: 1.5rem;
+      text-align: center;
+    }
+    .icon { font-size: 4rem; }
+    h1 { font-size: 1.5rem; color: #a78bfa; }
+    p { color: #9ca3af; max-width: 360px; line-height: 1.6; }
+    button {
+      background: #7c3aed;
+      color: white;
+      border: none;
+      border-radius: 0.5rem;
+      padding: 0.75rem 1.5rem;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    button:hover { background: #6d28d9; }
+  </style>
+</head>
+<body>
+  <div class="icon">⚔️</div>
+  <h1>Нет подключения к сети</h1>
+  <p>Проверьте интернет-соединение и попробуйте снова. Часть контента может быть доступна из кэша.</p>
+  <button onclick="location.reload()">Повторить</button>
+</body>
+</html>

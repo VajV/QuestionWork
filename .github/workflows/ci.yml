@@ -91,6 +91,16 @@ jobs:
           cd frontend
           npm test --if-present
 
+      - name: Build backend Docker image
+        run: |
+          cd backend
+          docker build -t questionwork-backend:ci .
+
+      - name: Build frontend Docker image
+        run: |
+          cd frontend
+          docker build --build-arg NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1 -t questionwork-frontend:ci .
+
   smoke-baseline:
     runs-on: windows-latest
     services:

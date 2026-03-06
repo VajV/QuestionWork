@@ -1,6 +1,6 @@
 """
 Модуль безопасности
-JWT токены, хеширование паролей
+JWT токены, хеширование паролей, TOTP encryption
 
 Используем bcrypt напрямую для совместимости
 """
@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import jwt, JWTError
 import bcrypt
+import base64
+import hashlib
 import logging
 import secrets
 import json
@@ -22,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 # In-memory fallback store for refresh tokens (token -> user_id, exp)
 _IN_MEMORY_REFRESH_STORE = {}
+_IN_MEMORY_MAX_TOKENS = 10_000
 
 
 def _get_redis_client():
@@ -149,6 +152,19 @@ def create_refresh_token(user_id: str) -> Tuple[str, int]:
     if client:
         client.set(key, user_id, ex=expires_seconds)
     else:
+        # Evict oldest 25% if at capacity (I-10: log eviction)
+        if len(_IN_MEMORY_REFRESH_STORE) >= _IN_MEMORY_MAX_TOKENS:
+            evict_count = _IN_MEMORY_MAX_TOKENS // 4
+            sorted_tokens = sorted(
+                _IN_MEMORY_REFRESH_STORE.items(), key=lambda x: x[1].get("exp", 0)
+            )
+            for tok, _ in sorted_tokens[:evict_count]:
+                _IN_MEMORY_REFRESH_STORE.pop(tok, None)
+            logger.warning(
+                "In-memory refresh token store at capacity (%d). Evicted %d oldest tokens.",
+                _IN_MEMORY_MAX_TOKENS,
+                evict_count,
+            )
         exp_ts = int((datetime.now(timezone.utc) + expires).timestamp())
         _IN_MEMORY_REFRESH_STORE[token] = {"user_id": user_id, "exp": exp_ts}
 
@@ -191,3 +207,33 @@ def revoke_refresh_token(token: str) -> None:
             logger.warning("Failed to delete refresh token from Redis")
     else:
         _IN_MEMORY_REFRESH_STORE.pop(token, None)
+
+
+# ── TOTP secret encryption (I-07) ─────────────────────────────────────────
+
+def _totp_fernet_key() -> bytes:
+    """Derive a 32-byte Fernet key from SECRET_KEY via SHA-256."""
+    digest = hashlib.sha256(settings.SECRET_KEY.encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(digest)
+
+
+def encrypt_totp_secret(plain_secret: str) -> str:
+    """Encrypt a TOTP secret for storage in the database."""
+    from cryptography.fernet import Fernet
+    f = Fernet(_totp_fernet_key())
+    return f.encrypt(plain_secret.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_totp_secret(encrypted_secret: str) -> str:
+    """Decrypt a TOTP secret retrieved from the database.
+
+    If decryption fails (e.g., legacy plaintext secret), returns the
+    input as-is so existing unencrypted secrets still work during migration.
+    """
+    from cryptography.fernet import Fernet, InvalidToken
+    try:
+        f = Fernet(_totp_fernet_key())
+        return f.decrypt(encrypted_secret.encode("utf-8")).decode("utf-8")
+    except (InvalidToken, Exception):
+        # Graceful fallback: treat as plaintext (pre-encryption secret)
+        return encrypted_secret

@@ -404,55 +404,56 @@ async def confirm_quest_completion(
     **All mutations run inside a DB transaction** so that a failure at any
     step causes a full rollback (XP, wallet, transaction log).
     """
-    # ── Pre-checks (read-only) ────────────────────
-    quest = await conn.fetchrow("SELECT * FROM quests WHERE id = $1", quest_id)
-    if not quest:
-        raise ValueError("Quest not found")
-
-    if quest["client_id"] != current_user.id:
-        raise PermissionError("Only client can confirm completion")
-
-    if quest["status"] != QuestStatusEnum.completed.value:
-        raise ValueError("Quest has not been marked as completed by freelancer")
-
-    # Guard: if already confirmed, reject (prevents double-payment)
-    if quest["status"] == QuestStatusEnum.confirmed.value:
-        raise ValueError("Quest has already been confirmed and paid")
-
-    freelancer_row = await conn.fetchrow(
-        "SELECT * FROM users WHERE id = $1", quest["assigned_to"]
-    )
-    if not freelancer_row:
-        raise ValueError(f"Freelancer not found: {quest['assigned_to']}")
-
-    # ── Calculate rewards ────────────────────
-    quest_grade = GradeEnum(quest["required_grade"])
-    freelancer_grade = GradeEnum(freelancer_row["grade"])
-
-    xp_reward = calculate_quest_rewards(
-        budget=float(quest["budget"]),
-        quest_grade=quest_grade,
-        user_grade=freelancer_grade,
-    )
-
-    old_level = freelancer_row["level"]
-    new_xp = freelancer_row["xp"] + xp_reward
-    level_up, new_grade, new_level = check_level_up(new_xp, freelancer_grade)
-    new_xp_to_next = calculate_xp_to_next(new_xp, new_grade)
-
-    # Stat growth on level-up
-    levels_gained = max(0, new_level - old_level)
-    stat_delta = allocate_stat_points(levels_gained) if levels_gained > 0 else {"int": 0, "dex": 0, "cha": 0, "unspent": 0}
-    new_stats_int = freelancer_row["stats_int"] + stat_delta["int"]
-    new_stats_dex = freelancer_row["stats_dex"] + stat_delta["dex"]
-    new_stats_cha = freelancer_row["stats_cha"] + stat_delta["cha"]
-    new_stat_points = freelancer_row.get("stat_points", 0) + stat_delta["unspent"]
-
-    now = datetime.now(timezone.utc)
-
-    # ── Atomic transaction ────────────────────
+    # ── Single atomic transaction: lock, validate, calculate, mutate ────────
     async with conn.transaction():
-        # 0. Lock quest row and flip status to 'confirmed' FIRST to prevent double-payment
+        quest = await conn.fetchrow(
+            "SELECT * FROM quests WHERE id = $1 FOR UPDATE", quest_id
+        )
+        if not quest:
+            raise ValueError("Quest not found")
+
+        if quest["client_id"] != current_user.id:
+            raise PermissionError("Only client can confirm completion")
+
+        if quest["status"] != QuestStatusEnum.completed.value:
+            raise ValueError("Quest has not been marked as completed by freelancer")
+
+        # Guard: if already confirmed, reject (prevents double-payment)
+        if quest["status"] == QuestStatusEnum.confirmed.value:
+            raise ValueError("Quest has already been confirmed and paid")
+
+        freelancer_row = await conn.fetchrow(
+            "SELECT * FROM users WHERE id = $1 FOR UPDATE", quest["assigned_to"]
+        )
+        if not freelancer_row:
+            raise ValueError(f"Freelancer not found: {quest['assigned_to']}")
+
+        # ── Calculate rewards ────────────────────
+        quest_grade = GradeEnum(quest["required_grade"])
+        freelancer_grade = GradeEnum(freelancer_row["grade"])
+
+        xp_reward = calculate_quest_rewards(
+            budget=float(quest["budget"]),
+            quest_grade=quest_grade,
+            user_grade=freelancer_grade,
+        )
+
+        old_level = freelancer_row["level"]
+        new_xp = freelancer_row["xp"] + xp_reward
+        level_up, new_grade, new_level = check_level_up(new_xp, freelancer_grade)
+        new_xp_to_next = calculate_xp_to_next(new_xp, new_grade)
+
+        # Stat growth on level-up
+        levels_gained = max(0, new_level - old_level)
+        stat_delta = allocate_stat_points(levels_gained) if levels_gained > 0 else {"int": 0, "dex": 0, "cha": 0, "unspent": 0}
+        new_stats_int = freelancer_row["stats_int"] + stat_delta["int"]
+        new_stats_dex = freelancer_row["stats_dex"] + stat_delta["dex"]
+        new_stats_cha = freelancer_row["stats_cha"] + stat_delta["cha"]
+        new_stat_points = freelancer_row.get("stat_points", 0) + stat_delta["unspent"]
+
+        now = datetime.now(timezone.utc)
+
+        # 0. Flip status to 'confirmed' (CAS guard against double-payment)
         updated = await conn.fetchval(
             "UPDATE quests SET status = $1, updated_at = $2 WHERE id = $3 AND status = $4 RETURNING id",
             QuestStatusEnum.confirmed.value,
@@ -496,13 +497,12 @@ async def confirm_quest_completion(
         )
 
         # 3. Badge check — count confirmed quests for freelancer
-        #    (status is already 'confirmed' for this quest after step 0)
         completed_count_row = await conn.fetchval(
             "SELECT COUNT(*) FROM quests WHERE assigned_to = $1 AND status = $2",
             quest["assigned_to"],
             QuestStatusEnum.confirmed.value,
         )
-        quests_completed = int(completed_count_row or 0)  # already includes this one
+        quests_completed = int(completed_count_row or 0)
         badge_event_data = {
             "quests_completed": quests_completed,
             "xp": new_xp,

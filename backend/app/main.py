@@ -159,13 +159,30 @@ async def metrics_middleware(request: Request, call_next):
     return response
 
 
-from app.api.deps import require_auth
+from app.api.deps import require_admin
 
-@app.get("/metrics", dependencies=[Depends(require_auth)])
+@app.get("/metrics", dependencies=[Depends(require_admin)])
 def metrics():
-    """Prometheus metrics endpoint (requires authentication)."""
+    """Prometheus metrics endpoint (admin-only)."""
     data = generate_latest()
     return Response(content=data, media_type=CONTENT_TYPE_LATEST)
+
+
+# I-05: Request body size limit (1 MB)
+MAX_BODY_SIZE = 1 * 1024 * 1024  # 1 MB
+
+
+@app.middleware("http")
+async def limit_body_size(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_BODY_SIZE:
+        return Response(
+            content='{"detail":"Request body too large (max 1 MB)"}',
+            status_code=413,
+            media_type="application/json",
+        )
+    return await call_next(request)
+
 
 # Настраиваем CORS (разрешаем запросы с фронтенда)
 app.add_middleware(
@@ -180,11 +197,50 @@ app.add_middleware(
 app.include_router(api_router, prefix="/api/v1")
 
 
-# Health check endpoint
+# Health check endpoint (liveness probe)
 @app.get("/health")
 async def health_check():
-    """Проверка работоспособности API"""
+    """Проверка работоспособности API (liveness)"""
     return {"status": "ok", "message": "QuestionWork API is running"}
+
+
+# Readiness probe — checks DB & Redis connectivity
+@app.get("/ready")
+async def readiness_check():
+    """Kubernetes readiness probe — verifies DB pool and Redis are reachable."""
+    checks: dict = {}
+
+    # DB check
+    try:
+        from app.db.session import pool as db_pool
+        if db_pool is None:
+            checks["db"] = "not initialized"
+        else:
+            async with db_pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            checks["db"] = "ok"
+    except Exception as e:
+        checks["db"] = f"error: {e}"
+
+    # Redis check
+    try:
+        import redis as redis_lib
+        if settings.REDIS_URL:
+            client = redis_lib.from_url(settings.REDIS_URL, decode_responses=True)
+            client.ping()
+            checks["redis"] = "ok"
+        else:
+            checks["redis"] = "not configured"
+    except Exception as e:
+        checks["redis"] = f"error: {e}"
+
+    all_ok = all(v == "ok" for v in checks.values() if v != "not configured")
+    status_code = 200 if all_ok else 503
+    return Response(
+        content=__import__("json").dumps({"ready": all_ok, "checks": checks}),
+        status_code=status_code,
+        media_type="application/json",
+    )
 
 
 # Root endpoint

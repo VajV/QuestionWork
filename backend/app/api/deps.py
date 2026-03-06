@@ -14,7 +14,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 
 from app.core.config import settings
 from app.core.otel_utils import db_span
-from app.core.security import decode_access_token
+from app.core.security import decode_access_token, decrypt_totp_secret
 from app.db.session import get_db_connection
 from app.models.user import UserProfile, UserRoleEnum, row_to_user_profile
 
@@ -137,10 +137,10 @@ async def require_admin(
             )
 
         # Fetch totp_secret straight from DB (authoritative, not cached in JWT)
-        totp_secret = await conn.fetchval(
+        totp_secret_encrypted = await conn.fetchval(
             "SELECT totp_secret FROM users WHERE id = $1", current_user.id
         )
-        if not totp_secret:
+        if not totp_secret_encrypted:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Admin 2FA not configured. Call POST /api/v1/admin/auth/totp/setup first.",
@@ -150,6 +150,7 @@ async def require_admin(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="X-TOTP-Token header required for admin access",
             )
+        totp_secret = decrypt_totp_secret(totp_secret_encrypted)
         totp = pyotp.TOTP(totp_secret)
         if not totp.verify(x_totp_token, valid_window=1):
             raise HTTPException(

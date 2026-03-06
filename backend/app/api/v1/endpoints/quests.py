@@ -9,9 +9,10 @@ import logging
 from typing import Optional
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.deps import get_current_user, require_auth
+from app.core.ratelimit import check_rate_limit
 from app.db.session import get_db_connection
 from app.models.quest import (
     Quest,
@@ -72,11 +73,14 @@ async def get_quest(
 
 @router.post("/", response_model=Quest, status_code=status.HTTP_201_CREATED)
 async def create_quest(
+    request: Request,
     quest_data: QuestCreate,
     current_user: UserProfile = Depends(require_auth),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Создать новый квест. Только клиенты могут создавать квесты."""
+    ip = request.client.host if request.client else "unknown"
+    check_rate_limit(ip, action="create_quest", limit=10, window_seconds=60)
     if current_user.role != "client":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -89,10 +93,13 @@ async def create_quest(
 async def apply_to_quest(
     quest_id: str,
     application_data: QuestApplicationCreate,
+    request: Request,
     current_user: UserProfile = Depends(require_auth),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Откликнуться на квест"""
+    ip = request.client.host if request.client else "unknown"
+    check_rate_limit(ip, action="apply_quest", limit=20, window_seconds=60)
     try:
         application = await quest_service.apply_to_quest(
             conn, quest_id, application_data, current_user
