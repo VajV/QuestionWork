@@ -72,6 +72,18 @@ _BONUS_LABELS: dict[str, str] = {
     BonusType.burnout_threshold: "Выгорание после {v} квестов подряд",
     BonusType.burnout_xp_penalty: "{v:.0%} XP при выгорании",
     BonusType.burnout_duration_hours: "Выгорание длится {v}ч",
+    BonusType.first_apply_bonus: "+{v:.0%} XP за первый отклик",
+    BonusType.exclusive_blocked: "Блокировка эксклюзивных квестов",
+    BonusType.stale_bonus: "+{v:.0%} XP за залежавшиеся квесты",
+    BonusType.urgent_penalty: "{v:.0%} XP на срочных квестах",
+    BonusType.ontime_bonus: "+{v:.0%} XP за работу в срок",
+    BonusType.five_star_bonus: "+{v:.0%} XP за 5★ результат",
+    BonusType.anonymous_blocked: "Блокировка анонимных квестов",
+    BonusType.high_budget_bonus: "+{v:.0%} XP за дорогие контракты",
+    BonusType.normal_budget_penalty: "{v:.0%} XP на обычных бюджетах",
+    BonusType.urgent_blocked: "Блокировка срочных квестов",
+    BonusType.analytics_bonus: "+{v:.0%} XP за аналитические задачи",
+    BonusType.creative_penalty: "{v:.0%} XP на креативных задачах",
 }
 
 
@@ -109,9 +121,9 @@ def _config_to_info(cfg) -> CharacterClassInfo:
 # ────────────────────────────────────────────
 
 def list_classes(user_level: int, current_class: Optional[str] = None) -> ClassListResponse:
-    """List all available classes for display."""
-    all_configs = get_all_classes()
-    classes = [_config_to_info(c) for c in all_configs]
+    """List classes available at the given user level."""
+    available_configs = get_available_classes(user_level)
+    classes = [_config_to_info(c) for c in available_configs]
     return ClassListResponse(classes=classes, user_level=user_level, current_class=current_class)
 
 
@@ -145,10 +157,11 @@ async def get_user_class_info(conn: asyncpg.Connection, user_id: str) -> Optiona
     consecutive = progress["consecutive_quests"] if progress else 0
     burnout_until = progress["burnout_until"] if progress else None
     perk_points_spent = progress["perk_points_spent"] if progress else 0
+    bonus_perk_points = progress["bonus_perk_points"] if progress else 0
     rage_active_until = progress["rage_active_until"] if progress else None
 
     is_burnout = burnout_until is not None and burnout_until > now
-    perk_points_total = calculate_perk_points_available(class_level, cfg.perk_points_per_level)
+    perk_points_total = calculate_perk_points_available(class_level, cfg.perk_points_per_level) + bonus_perk_points
     perk_points_available = perk_points_total - perk_points_spent
     rage_active = rage_active_until is not None and rage_active_until > now
 
@@ -182,6 +195,7 @@ async def get_user_class_info(conn: asyncpg.Connection, user_id: str) -> Optiona
         perk_points_total=perk_points_total,
         perk_points_spent=perk_points_spent,
         perk_points_available=perk_points_available,
+        bonus_perk_points=bonus_perk_points,
         unlocked_perks=unlocked_perks,
         rage_active=rage_active,
         rage_active_until=rage_active_until if rage_active else None,
@@ -220,7 +234,7 @@ async def select_class(
 
     # Check existing class
     existing = await conn.fetchrow(
-        "SELECT character_class, class_trial_expires_at, class_selected_at FROM users WHERE id = $1",
+        "SELECT character_class, class_trial_expires_at, class_selected_at FROM users WHERE id = $1 FOR UPDATE",
         user.id,
     )
     now = datetime.now(timezone.utc)
@@ -306,6 +320,10 @@ async def confirm_class(conn: asyncpg.Connection, user: UserProfile) -> ClassSel
         raise ValueError("Класс уже подтверждён")
 
     now = datetime.now(timezone.utc)
+
+    if row["class_trial_expires_at"] < now:
+        raise ValueError("Пробный период истёк. Выберите класс заново.")
+
     # Clear trial — class is now permanent
     await conn.execute(
         "UPDATE users SET class_trial_expires_at = NULL, class_selected_at = $1, updated_at = $2 WHERE id = $3",
@@ -366,6 +384,9 @@ async def add_class_xp(
     Returns dict with class progression details.
     Must be called inside an active DB transaction.
     """
+    if not conn.is_in_transaction():
+        raise RuntimeError("add_class_xp must be called inside a DB transaction")
+
     user_row = await conn.fetchrow(
         "SELECT character_class FROM users WHERE id = $1",
         user_id,
@@ -407,9 +428,9 @@ async def add_class_xp(
 
     now = datetime.now(timezone.utc)
 
-    # Update progression
+    # Update progression (FOR UPDATE to prevent race on consecutive_quests)
     progress = await conn.fetchrow(
-        "SELECT * FROM user_class_progress WHERE user_id = $1",
+        "SELECT * FROM user_class_progress WHERE user_id = $1 FOR UPDATE",
         user_id,
     )
     if not progress:
@@ -436,9 +457,23 @@ async def add_class_xp(
     burnout_threshold += int(perk_effects.get("burnout_threshold_bonus", 0))
     burnout_until = progress["burnout_until"]
 
+    # Detect if rage mode just expired (rage_active_until in past, not yet cleared)
+    rage_just_expired = (
+        not rage_active
+        and progress["rage_active_until"] is not None
+        and progress["rage_active_until"] < now
+    )
+
     # Rage Mode: burnout immune while active
     if rage_active:
         pass  # skip burnout check entirely
+    elif rage_just_expired and (burnout_until is None or burnout_until < now):
+        # Post-rage burnout: forced burnout after rage expires
+        rage_ability = get_ability_config(class_id_str, "rage_mode")
+        post_rage_hours = int(rage_ability.effects.get("post_rage_burnout_hours", 12)) if rage_ability else 12
+        burnout_until = now + timedelta(hours=post_rage_hours)
+        new_consecutive = 0
+        logger.info(f"Post-rage burnout for user {user_id}, class {class_id_str}, until {burnout_until}")
     elif new_consecutive >= burnout_threshold and (burnout_until is None or burnout_until < now):
         burnout_hours = cfg.weaknesses.get(BonusType.burnout_duration_hours, 24) if cfg else 24
         # Perk: burnout_duration_reduction_hours reduces duration
@@ -447,13 +482,16 @@ async def add_class_xp(
         new_consecutive = 0  # reset counter after burnout triggers
         logger.info(f"Burnout triggered for user {user_id}, class {class_id_str}, until {burnout_until}")
 
+    # Clear rage_active_until once rage has expired so post-rage burnout triggers only once
+    new_rage_until = None if rage_just_expired else progress["rage_active_until"]
+
     await conn.execute(
         """
         UPDATE user_class_progress
         SET class_xp = $1, class_level = $2, quests_completed = $3,
             consecutive_quests = $4, last_quest_at = $5, burnout_until = $6,
-            updated_at = $7
-        WHERE user_id = $8
+            updated_at = $7, rage_active_until = $8
+        WHERE user_id = $9
         """,
         new_xp,
         new_level,
@@ -462,6 +500,7 @@ async def add_class_xp(
         now,
         burnout_until,
         now,
+        new_rage_until,
         user_id,
     )
 
@@ -487,12 +526,15 @@ async def add_class_xp(
             stat_updates = []
             stat_args = []
             idx = 1
+            _VALID_STATS = {"int", "dex", "cha"}
             for stat_key, bonus_per_level in cfg.stat_bias.items():
+                if stat_key not in _VALID_STATS:
+                    continue
                 if bonus_per_level <= 0:
                     continue
                 delta = bonus_per_level * levels_gained
                 col = f"stats_{stat_key}"  # e.g. stats_dex
-                stat_updates.append(f"{col} = {col} + ${idx}")
+                stat_updates.append(f"{col} = LEAST({col} + ${idx}, 100)")  # R-06: cap at 100
                 stat_args.append(delta)
                 idx += 1
             if stat_updates:
@@ -551,10 +593,10 @@ async def reset_consecutive_if_stale(conn: asyncpg.Connection, user_id: str) -> 
 
 async def _load_user_class_ctx(
     conn: asyncpg.Connection, user_id: str
-) -> tuple[str, int, int, set[str]]:
+) -> tuple[str, int, int, int, set[str]]:
     """Load class context needed by perk/ability functions.
 
-    Returns (class_id_str, class_level, perk_points_spent, owned_perk_ids).
+    Returns (class_id_str, class_level, perk_points_spent, bonus_perk_points, owned_perk_ids).
     Raises ValueError if user has no active class.
     """
     row = await conn.fetchrow(
@@ -565,18 +607,19 @@ async def _load_user_class_ctx(
 
     class_id_str = row["character_class"]
     progress = await conn.fetchrow(
-        "SELECT class_level, perk_points_spent FROM user_class_progress WHERE user_id = $1",
+        "SELECT class_level, perk_points_spent, bonus_perk_points FROM user_class_progress WHERE user_id = $1 FOR UPDATE",
         user_id,
     )
     class_level = progress["class_level"] if progress else 1
     perk_points_spent = progress["perk_points_spent"] if progress else 0
+    bonus_perk_points = progress["bonus_perk_points"] if progress else 0
 
     perk_rows = await conn.fetch(
         "SELECT perk_id FROM user_perks WHERE user_id = $1 AND class_id = $2",
         user_id, class_id_str,
     )
     owned_perk_ids = {r["perk_id"] for r in perk_rows}
-    return class_id_str, class_level, perk_points_spent, owned_perk_ids
+    return class_id_str, class_level, perk_points_spent, bonus_perk_points, owned_perk_ids
 
 
 def _perk_to_info(
@@ -604,14 +647,14 @@ async def get_user_perk_tree(
     conn: asyncpg.Connection, user_id: str
 ) -> PerkTreeResponse:
     """Build the full perk tree for the user's current class."""
-    class_id_str, class_level, perk_points_spent, owned_ids = (
+    class_id_str, class_level, perk_points_spent, bonus_perk_points, owned_ids = (
         await _load_user_class_ctx(conn, user_id)
     )
     cfg = get_class_config(class_id_str)
     if cfg is None:
         raise ValueError("Неизвестный класс")
 
-    total_points = calculate_perk_points_available(class_level, cfg.perk_points_per_level)
+    total_points = calculate_perk_points_available(class_level, cfg.perk_points_per_level) + bonus_perk_points
     available = total_points - perk_points_spent
 
     perks: list[PerkInfo] = []
@@ -635,7 +678,7 @@ async def unlock_perk(
     conn: asyncpg.Connection, user_id: str, perk_id: str
 ) -> PerkUnlockResponse:
     """Unlock a perk for the user. Must be called inside a transaction."""
-    class_id_str, class_level, perk_points_spent, owned_ids = (
+    class_id_str, class_level, perk_points_spent, bonus_perk_points, owned_ids = (
         await _load_user_class_ctx(conn, user_id)
     )
     cfg = get_class_config(class_id_str)
@@ -646,7 +689,7 @@ async def unlock_perk(
     if perk is None:
         raise ValueError(f"Перк не найден: {perk_id}")
 
-    total_points = calculate_perk_points_available(class_level, cfg.perk_points_per_level)
+    total_points = calculate_perk_points_available(class_level, cfg.perk_points_per_level) + bonus_perk_points
     available = total_points - perk_points_spent
 
     ok, reason = can_unlock_perk(perk, class_level, owned_ids, available)
