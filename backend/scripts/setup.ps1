@@ -29,25 +29,15 @@ foreach ($folder in $folders) {
     }
 }
 
-Write-Host "`n[2/6] Создание requirements.txt..." -ForegroundColor Yellow
-
-$requirements = @'
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-python-dotenv==1.0.0
-pydantic==2.5.3
-pydantic-settings==2.1.0
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-multipart==0.0.6
-asyncpg==0.29.0
-redis==5.0.1
-httpx==0.26.0
-'@
+Write-Host "`n[2/6] Checking requirements.txt..." -ForegroundColor Yellow
 
 $requirementsPath = Join-Path $BACKEND_ROOT "requirements.txt"
-$requirements | Out-File -FilePath $requirementsPath -Encoding UTF8 -Force
-Write-Host "  + requirements.txt" -ForegroundColor Green
+if (Test-Path $requirementsPath) {
+    Write-Host "  requirements.txt already exists — skipping overwrite" -ForegroundColor Green
+} else {
+    Write-Host "  ERROR: requirements.txt not found. Please restore from git." -ForegroundColor Red
+    exit 1
+}
 
 Write-Host "`n[3/6] Создание .env.example..." -ForegroundColor Yellow
 
@@ -84,10 +74,16 @@ $envExamplePath = Join-Path $BACKEND_ROOT ".env.example"
 $envExample | Out-File -FilePath $envExamplePath -Encoding UTF8 -Force
 Write-Host "  + .env.example" -ForegroundColor Green
 
-# Создаём .env (копия .env.example для быстрого старта)
+# Создаём .env with a strong generated SECRET_KEY
 $envPath = Join-Path $BACKEND_ROOT ".env"
-$envExample | Out-File -FilePath $envPath -Encoding UTF8 -Force
-Write-Host "  + .env (готов к использованию)" -ForegroundColor Green
+if (Test-Path $envPath) {
+    Write-Host "  .env already exists — skipping" -ForegroundColor Green
+} else {
+    $generatedSecret = python -c "import secrets; print(secrets.token_urlsafe(32))"
+    $envContent = $envExample -replace 'your-secret-key-change-in-production', $generatedSecret
+    $envContent | Out-File -FilePath $envPath -Encoding UTF8 -Force
+    Write-Host "  + .env (created with generated SECRET_KEY)" -ForegroundColor Green
+}
 
 Write-Host "`n[4/6] Создание файлов приложения..." -ForegroundColor Yellow
 
@@ -226,8 +222,8 @@ JWT токены, хеширование паролей
 
 from datetime import datetime, timedelta
 from typing import Optional
-from jose import jwt
-from passlib.context import CryptContext
+import jwt
+import bcrypt
 from app.core.config import settings
 
 # Контекст для хеширования паролей (bcrypt)

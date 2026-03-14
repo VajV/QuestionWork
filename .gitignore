@@ -1,8 +1,47 @@
-"node_modules/" 
-"__pycache__/" 
-"*.pyc" 
-".env" 
-"venv/" 
-".venv/" 
-"dist/" 
-".next/" 
+# Dependencies
+node_modules/
+.venv/
+venv/
+backend/.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Environment / Secrets
+.env
+.env.*
+!.env.example
+
+# Next.js
+.next/
+out/
+
+# Coverage / Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Build artifacts
+*.dll
+*.so
+*.dylib
