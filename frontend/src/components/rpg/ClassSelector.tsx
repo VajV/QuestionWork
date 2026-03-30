@@ -1,22 +1,25 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { X, Shield, Zap, Lock, Check, AlertTriangle } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { motion, AnimatePresence } from "@/lib/motion";
+import { X, Shield, Lock, Check, AlertTriangle } from "lucide-react";
 import type { CharacterClassInfo, ClassListResponse, UserClassInfo } from "@/lib/api";
-import { getClasses, selectClass, confirmClass, resetClass, getMyClass } from "@/lib/api";
+import {
+  getClasses,
+  selectClass,
+  confirmClass,
+  resetClass,
+  getMyClass,
+  getApiErrorMessage,
+} from "@/lib/api";
 
 interface ClassSelectorProps {
   isOpen: boolean;
   onClose: () => void;
   userLevel: number;
   currentClass: string | null;
-  onClassSelected?: (classInfo: UserClassInfo) => void;
+  onClassSelected?: (classInfo: UserClassInfo | null) => void;
 }
-
-const CLASS_ICONS: Record<string, typeof Shield> = {
-  berserk: Zap,
-};
 
 export default function ClassSelector({
   isOpen,
@@ -28,34 +31,61 @@ export default function ClassSelector({
   const [classes, setClasses] = useState<CharacterClassInfo[]>([]);
   const [myClassInfo, setMyClassInfo] = useState<UserClassInfo | null>(null);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const fetchData = useCallback(async () => {
+    setInitialLoading(true);
     try {
       const data: ClassListResponse = await getClasses();
       setClasses(data.classes);
       if (currentClass) {
         try {
           const info = await getMyClass();
-          setMyClassInfo(info);
+          setMyClassInfo(info.has_class ? info : null);
         } catch {
           /* no class yet */
         }
       }
-    } catch {
-      setError("Не удалось загрузить классы");
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, "Не удалось загрузить классы"));
+    } finally {
+      setInitialLoading(false);
     }
   }, [currentClass]);
 
   useEffect(() => {
     if (isOpen) {
-      fetchData();
       setError(null);
       setSuccess(null);
+      setSelectedClassId(null);
+      fetchData();
     }
+    return () => {
+      setError(null);
+      setSuccess(null);
+    };
   }, [isOpen, fetchData]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    closeButtonRef.current?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
 
   const handleSelect = async (classId: string) => {
     setLoading(true);
@@ -65,10 +95,8 @@ export default function ClassSelector({
       setSuccess(result.message);
       setMyClassInfo(result.class_info);
       onClassSelected?.(result.class_info);
-    } catch (err) {
-      const msg =
-        err instanceof Response ? err.statusText : "Ошибка выбора класса";
-      setError(msg);
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, "Ошибка выбора класса"));
     } finally {
       setLoading(false);
     }
@@ -82,12 +110,8 @@ export default function ClassSelector({
       setSuccess(result.message);
       setMyClassInfo(result.class_info);
       onClassSelected?.(result.class_info);
-    } catch (err) {
-      const msg =
-        err instanceof Response
-          ? err.statusText
-          : "Ошибка подтверждения класса";
-      setError(msg);
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, "Ошибка подтверждения класса"));
     } finally {
       setLoading(false);
     }
@@ -100,11 +124,9 @@ export default function ClassSelector({
       const result = await resetClass();
       setSuccess(result.message);
       setMyClassInfo(null);
-      onClassSelected?.(null as unknown as UserClassInfo);
-    } catch (err) {
-      const msg =
-        err instanceof Response ? err.statusText : "Ошибка сброса класса";
-      setError(msg);
+      onClassSelected?.(null);
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, "Ошибка сброса класса"));
     } finally {
       setLoading(false);
     }
@@ -115,14 +137,18 @@ export default function ClassSelector({
   return (
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+        className="fixed inset-0 z-50 overflow-y-auto bg-black/70 px-4 py-4 backdrop-blur-sm sm:px-6 sm:py-6"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         onClick={onClose}
       >
         <motion.div
-          className="rpg-card w-full max-w-2xl max-h-[85vh] overflow-y-auto m-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="class-selector-title"
+          className="rpg-card mx-auto flex w-full max-w-3xl flex-col overflow-hidden"
+          style={{ maxHeight: "calc(100vh - 2rem)" }}
           initial={{ scale: 0.9, y: 20 }}
           animate={{ scale: 1, y: 0 }}
           exit={{ scale: 0.9, y: 20 }}
@@ -130,19 +156,22 @@ export default function ClassSelector({
         >
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-amber-900/30">
-            <h2 className="text-2xl font-cinzel text-amber-500 flex items-center gap-2">
+            <h2 id="class-selector-title" className="text-2xl font-cinzel text-amber-500 flex items-center gap-2">
               <Shield size={28} />
               Выбор класса
             </h2>
             <button
+              ref={closeButtonRef}
+              type="button"
               onClick={onClose}
+              aria-label="Закрыть окно выбора класса"
               className="text-gray-400 hover:text-white transition-colors"
             >
               <X size={24} />
             </button>
           </div>
 
-          <div className="p-6 space-y-6">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-6 space-y-6">
             {/* Status messages */}
             {error && (
               <div className="p-3 rounded-lg bg-red-900/30 border border-red-500/30 text-red-400 text-sm">
@@ -155,8 +184,16 @@ export default function ClassSelector({
               </div>
             )}
 
+            {initialLoading && (
+              <div className="space-y-3" aria-live="polite">
+                {[1, 2, 3].map((item) => (
+                  <div key={item} className="h-28 rounded-lg bg-gray-800/40 animate-pulse" />
+                ))}
+              </div>
+            )}
+
             {/* Current class info */}
-            {myClassInfo && (
+            {!initialLoading && myClassInfo && (
               <div
                 className="p-4 rounded-lg border"
                 style={{
@@ -188,8 +225,10 @@ export default function ClassSelector({
                   <div className="flex gap-2">
                     {myClassInfo.is_trial && (
                       <button
+                        type="button"
                         onClick={handleConfirm}
                         disabled={loading}
+                        aria-label="Подтвердить текущий класс"
                         className="rpg-button-sm bg-emerald-900/30 border border-emerald-500/50 text-emerald-400 hover:bg-emerald-800/40 px-3 py-1 rounded text-sm flex items-center gap-1"
                       >
                         <Check size={14} />
@@ -197,8 +236,10 @@ export default function ClassSelector({
                       </button>
                     )}
                     <button
+                      type="button"
                       onClick={handleReset}
                       disabled={loading}
+                      aria-label="Сбросить текущий класс"
                       className="rpg-button-sm bg-red-900/20 border border-red-500/30 text-red-400 hover:bg-red-800/30 px-3 py-1 rounded text-sm"
                     >
                       Сбросить
@@ -245,12 +286,39 @@ export default function ClassSelector({
             )}
 
             {/* Class list */}
+            {!initialLoading && classes.length === 0 && !error && (
+              <div className="rounded-lg border border-gray-700/40 bg-gray-900/30 p-6 text-center">
+                <p className="text-sm text-gray-300">Классы пока недоступны.</p>
+                <p className="mt-2 text-xs text-gray-500">Система классов ещё не заполнена на сервере.</p>
+                <button
+                  type="button"
+                  onClick={fetchData}
+                  className="mt-4 rounded-lg border border-amber-500/40 px-4 py-2 text-sm text-amber-300 transition-colors hover:bg-amber-900/20"
+                >
+                  Повторить
+                </button>
+              </div>
+            )}
+
+            {!initialLoading && error && classes.length === 0 && (
+              <div className="rounded-lg border border-red-500/30 bg-red-950/10 p-6 text-center">
+                <p className="text-sm text-red-300">{error}</p>
+                <button
+                  type="button"
+                  onClick={fetchData}
+                  className="mt-4 rounded-lg border border-amber-500/40 px-4 py-2 text-sm text-amber-300 transition-colors hover:bg-amber-900/20"
+                >
+                  Повторить
+                </button>
+              </div>
+            )}
+
+            {!initialLoading && classes.length > 0 && (
             <div className="space-y-4">
               {classes.map((cls) => {
                 const isLocked = userLevel < cls.min_unlock_level;
                 const isActive = currentClass === cls.class_id;
                 const isSelected = selectedClassId === cls.class_id;
-                const IconComp = CLASS_ICONS[cls.class_id] || Shield;
 
                 return (
                   <motion.div
@@ -352,11 +420,13 @@ export default function ClassSelector({
                         animate={{ opacity: 1, height: "auto" }}
                       >
                         <button
+                          type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleSelect(cls.class_id);
                           }}
                           disabled={loading}
+                          aria-label={`Выбрать класс ${cls.name_ru}`}
                           className="px-4 py-2 rounded font-cinzel text-sm border transition-colors"
                           style={{
                             borderColor: cls.color,
@@ -374,6 +444,7 @@ export default function ClassSelector({
                 );
               })}
             </div>
+            )}
 
             {userLevel < 5 && (
               <div className="text-center text-gray-500 text-sm p-4 border border-gray-700/30 rounded-lg">

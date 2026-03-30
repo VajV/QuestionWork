@@ -22,9 +22,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Callable, Coroutine, Optional
 
 import asyncpg
+
+from app.models.user import GradeEnum
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +47,11 @@ class EventBus:
         self._handlers: dict[type, list[EventHandler]] = {}
 
     def subscribe(self, event_type: type, handler: EventHandler) -> None:
-        """Register a handler for an event type."""
-        self._handlers.setdefault(event_type, []).append(handler)
-        logger.debug("EventBus: subscribed %s to %s", handler.__name__, event_type.__name__)
+        """Register a handler for an event type (P2-22: skip duplicates)."""
+        handlers_list = self._handlers.setdefault(event_type, [])
+        if handler not in handlers_list:
+            handlers_list.append(handler)
+            logger.debug("EventBus: subscribed %s to %s", handler.__name__, event_type.__name__)
 
     def on(self, event_type: type):
         """Decorator form of subscribe.
@@ -75,7 +80,15 @@ class EventBus:
             return
         logger.debug("EventBus: emitting %s to %d handler(s)", event_type.__name__, len(handlers))
         for handler in handlers:
-            await handler(conn, event)
+            try:
+                await handler(conn, event)
+            except Exception:
+                logger.exception(
+                    "EventBus: handler %s failed for %s",
+                    handler.__name__,
+                    event_type.__name__,
+                )
+                raise
 
     def clear(self) -> None:
         """Remove all handlers (useful for testing)."""
@@ -99,10 +112,10 @@ class QuestCompleted:
     quest_id: str
     base_xp: int
     final_xp: int
-    quest_budget: float
+    quest_budget: Decimal  # P0-05 FIX: was `object`, now properly typed
     is_urgent: bool
-    quest_grade: str
-    user_grade: str
+    quest_grade: GradeEnum
+    user_grade: GradeEnum
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 

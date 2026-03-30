@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "@/lib/motion";
 import {
   FileText,
   Search,
@@ -13,7 +13,9 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { adminGetLogs } from "@/lib/api";
-import type { AdminLogEntry, AdminLogsResponse } from "@/types";
+import type { AdminLogEntry, AdminLogValue, AdminLogsResponse } from "@/types";
+import GuildStatusStrip from "@/components/ui/GuildStatusStrip";
+import WorldPanel from "@/components/ui/WorldPanel";
 
 const PAGE_SIZE = 30;
 
@@ -80,7 +82,7 @@ export default function AdminLogsPage() {
   const toggleExpand = (id: string) => {
     setExpanded((prev) => {
       const s = new Set(prev);
-      s.has(id) ? s.delete(id) : s.add(id);
+      if (s.has(id)) { s.delete(id); } else { s.add(id); }
       return s;
     });
   };
@@ -106,8 +108,8 @@ export default function AdminLogsPage() {
       l.target_id,
       l.ip_address ?? "",
       l.created_at,
-      l.old_value ?? "",
-      l.new_value ?? "",
+      serializeLogPayload(l.old_value),
+      serializeLogPayload(l.new_value),
     ]);
     const csv = [headers, ...rows]
       .map((r) =>
@@ -127,17 +129,45 @@ export default function AdminLogsPage() {
     ? Math.max(1, Math.ceil(data.total / PAGE_SIZE))
     : 1;
 
-  const formatJson = (raw: string | null): string => {
-    if (!raw) return "—";
-    try {
-      return JSON.stringify(JSON.parse(raw), null, 2);
-    } catch {
-      return raw;
-    }
+  const serializeLogPayload = (value: AdminLogValue | null): string => {
+    if (value === null) return "";
+    if (typeof value === "string") return value;
+    return JSON.stringify(value);
+  };
+
+  const formatLogPayload = (value: AdminLogValue | null): string => {
+    if (value === null) return "—";
+    if (typeof value === "string") return value;
+    return JSON.stringify(value, null, 2);
   };
 
   return (
     <div className="space-y-6">
+      <GuildStatusStrip
+        mode="ops"
+        eyebrow="Ops audit"
+        title="Аудит-лог вынесен в верхний контрольный слой перед сырыми записями"
+        description="Контекст по объёму, фильтрам и выбранному режиму виден до таблицы, поэтому ops-аудит читается как command-center, а не как просто dump записей."
+        stats={[
+          { label: "Total", value: data?.total ?? 0, note: "всего записей", tone: "ops" },
+          { label: "Visible", value: filtered.length, note: "после фильтров", tone: "cyan" },
+          { label: "Actions", value: uniqueActions.length, note: "типов действий", tone: "purple" },
+          { label: "Page", value: `${page}/${totalPages}`, note: "позиция", tone: "slate" },
+        ]}
+        signals={[
+          { label: actionFilter || 'all actions', tone: actionFilter ? 'amber' : 'slate' },
+          { label: search.trim() ? 'forensic search active' : 'forensic overview', tone: search.trim() ? 'cyan' : 'emerald' },
+        ]}
+      />
+
+      <WorldPanel
+        eyebrow="Forensic control"
+        title="Поиск, admin filter и export приведены к единому ops-panel языку"
+        description="Так журналы продолжают ту же визуальную логику, что dashboard, users, quests и withdrawals."
+        tone="ops"
+        compact
+      />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -240,7 +270,7 @@ export default function AdminLogsPage() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: i * 0.02 }}
-                        className="border-t border-gray-800/50 hover:bg-gray-800/40 transition-colors even:bg-gray-900/30 cursor-pointer"
+                        className="data-table-row cursor-pointer border-t border-gray-800/50 hover:bg-gray-800/40 even:bg-gray-900/30"
                         onClick={() => toggleExpand(log.id)}
                       >
                         <td className="px-4 py-3 text-gray-600">
@@ -295,7 +325,7 @@ export default function AdminLogsPage() {
                       Old Value
                     </span>
                     <pre className="text-xs text-gray-400 bg-gray-900/60 rounded-lg p-3 overflow-x-auto max-h-48 font-mono">
-                      {formatJson(log.old_value)}
+                      {formatLogPayload(log.old_value)}
                     </pre>
                   </div>
                   <div>
@@ -303,7 +333,7 @@ export default function AdminLogsPage() {
                       New Value
                     </span>
                     <pre className="text-xs text-emerald-400/80 bg-gray-900/60 rounded-lg p-3 overflow-x-auto max-h-48 font-mono">
-                      {formatJson(log.new_value)}
+                      {formatLogPayload(log.new_value)}
                     </pre>
                   </div>
                 </div>

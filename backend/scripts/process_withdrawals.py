@@ -23,6 +23,7 @@ Usage:
 Environment:
     DATABASE_URL                   (required)
     WITHDRAWAL_AUTO_APPROVE_LIMIT  (default 50.0)
+    WITHDRAWAL_AUTO_APPROVE_JOBS_ENABLED
     SENTRY_DSN                     (optional — errors forwarded to Sentry)
     SLACK_WEBHOOK_URL              (optional — summary/errors posted to Slack)
 
@@ -67,6 +68,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger("process_withdrawals")
 
+LEGACY_PROCESSOR_GUARD_MESSAGE = (
+    "process_withdrawals.py must not run while WITHDRAWAL_AUTO_APPROVE_JOBS_ENABLED=true. "
+    "Disable the legacy cron/task before using the new withdrawal job path."
+)
+
+
+def _ensure_legacy_processor_allowed() -> None:
+    if not settings.WITHDRAWAL_AUTO_APPROVE_JOBS_ENABLED:
+        return
+
+    logger.error(LEGACY_PROCESSOR_GUARD_MESSAGE)
+    raise RuntimeError(LEGACY_PROCESSOR_GUARD_MESSAGE)
+
 
 async def run(*, dry_run: bool = False, batch_limit: int = 100) -> int:
     """
@@ -75,6 +89,8 @@ async def run(*, dry_run: bool = False, batch_limit: int = 100) -> int:
     Returns the number of withdrawals that were (or would be) approved.
     Returns 0 immediately if a concurrent instance already holds the advisory lock.
     """
+    _ensure_legacy_processor_allowed()
+
     logger.info(
         f"Starting withdrawal processor — "
         f"dry_run={dry_run}, batch_limit={batch_limit}, "

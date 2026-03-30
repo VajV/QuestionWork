@@ -25,7 +25,7 @@ def upgrade() -> None:
             'badge_first_review',
             'Первый отзыв',
             'Оставьте свой первый отзыв',
-            '📝',
+            'note',
             'reviews_given',
             1
         )
@@ -39,7 +39,7 @@ def upgrade() -> None:
             'badge_reviewer_5',
             'Опытный критик',
             'Оставьте 5 отзывов',
-            '🖊️',
+            'pen',
             'reviews_given',
             5
         )
@@ -53,7 +53,7 @@ def upgrade() -> None:
             'badge_reviewer_10',
             'Летописец гильдии',
             'Оставьте 10 отзывов',
-            '📚',
+            'books',
             'reviews_given',
             10
         )
@@ -67,7 +67,7 @@ def upgrade() -> None:
             'badge_five_star_1',
             'Звезда гильдии',
             'Получите первый 5-звёздочный отзыв',
-            '⭐',
+            'star',
             'five_star_received',
             1
         )
@@ -81,7 +81,7 @@ def upgrade() -> None:
             'badge_five_star_5',
             'Легенда гильдии',
             'Получите 5 пятизвёздочных отзывов',
-            '🌟',
+            'superstar',
             'five_star_received',
             5
         )
@@ -95,7 +95,7 @@ def upgrade() -> None:
             'badge_five_star_10',
             'Мифический мастер',
             'Получите 10 пятизвёздочных отзывов',
-            '💫',
+            'spark',
             'five_star_received',
             10
         )

@@ -13,16 +13,36 @@ import logging
 import math
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Optional, List, Dict, Any
 
 import asyncpg
 
 from app.core.config import settings
 from app.core.rewards import check_level_up, calculate_xp_to_next, allocate_stat_points, GRADE_XP_THRESHOLDS
+from app.core.classes import calculate_perk_points_available, get_class_config
 from app.models.user import GradeEnum
-from app.services import wallet_service, notification_service
+from app.models.quest import QuestStatusEnum
+from app.services import wallet_service, notification_service, guild_card_service, guild_economy_service, badge_service, class_service
+from app.services.quest_helpers import record_quest_status_history as _record_quest_status_history
 
 logger = logging.getLogger(__name__)
+
+ADMIN_SKILLS_MAX_ITEMS = 20
+ADMIN_SKILLS_MAX_LENGTH = 50
+
+_ADMIN_USER_DETAIL_COLUMNS = (
+    "id, username, email, role, level, grade, xp, xp_to_next, "
+    "stat_points, stats_int, stats_dex, stats_cha, bio, skills, "
+    "character_class, is_banned, banned_reason, banned_at, created_at, updated_at"
+)
+_ADMIN_USER_UPDATE_COLUMNS = (
+    "id, role, level, grade, xp, xp_to_next, stat_points, "
+    "stats_int, stats_dex, stats_cha, bio, skills, character_class"
+)
+_USER_PROGRESS_COLUMNS = (
+    "id, grade, xp, level, stat_points, stats_int, stats_dex, stats_cha, character_class"
+)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -34,6 +54,110 @@ def _assert_in_transaction(conn: asyncpg.Connection) -> None:
         raise RuntimeError(
             "This admin_service function must be called inside an explicit DB transaction."
         )
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+def _normalize_json_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []
+
+
+def _normalize_admin_skills(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError("skills must be provided as a list of strings")
+    if len(value) > ADMIN_SKILLS_MAX_ITEMS:
+        raise ValueError(f"skills must contain at most {ADMIN_SKILLS_MAX_ITEMS} items")
+
+    normalized: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError("skills must contain only strings")
+        skill = item.strip()
+        if not skill:
+            raise ValueError("skills cannot contain blank values")
+        if len(skill) > ADMIN_SKILLS_MAX_LENGTH:
+            raise ValueError(
+                f"each skill must be at most {ADMIN_SKILLS_MAX_LENGTH} characters"
+            )
+        normalized.append(skill)
+
+    return normalized
+
+
+def _escape_like(value: str) -> str:
+    """Escape LIKE/ILIKE special characters so they are matched literally."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+# _record_quest_status_history is imported from app.services.quest_helpers
+
+
+async def _cancel_quest_with_invariants(
+    conn: asyncpg.Connection,
+    quest_row,
+    *,
+    admin_id: str,
+    note: str,
+    user_message: str,
+) -> bool:
+    now = datetime.now(timezone.utc)
+    await conn.execute(
+        "UPDATE quests SET status = 'cancelled', updated_at = $1 WHERE id = $2",
+        now,
+        quest_row["id"],
+    )
+
+    refund_result = await wallet_service.refund_hold(
+        conn,
+        user_id=quest_row["client_id"],
+        quest_id=quest_row["id"],
+        currency=quest_row.get("currency", "RUB"),
+    )
+
+    await _record_quest_status_history(
+        conn,
+        quest_row["id"],
+        quest_row.get("status"),
+        "cancelled",
+        changed_by=admin_id,
+        note=note,
+        created_at=now,
+    )
+
+    await notification_service.create_notification(
+        conn,
+        user_id=quest_row["client_id"],
+        title="Квест отменён администратором",
+        message=user_message,
+        event_type="admin_quest_cancelled",
+    )
+
+    if quest_row.get("assigned_to") and quest_row["assigned_to"] != quest_row["client_id"]:
+        await notification_service.create_notification(
+            conn,
+            user_id=quest_row["assigned_to"],
+            title="Квест отменён администратором",
+            message=user_message,
+            event_type="admin_quest_cancelled",
+        )
+
+    return refund_result is not None
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -49,6 +173,10 @@ async def log_admin_action(
     old_value: Optional[dict] = None,
     new_value: Optional[dict] = None,
     ip_address: Optional[str] = None,
+    command_id: Optional[str] = None,
+    job_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
 ) -> str:
     """Insert an immutable audit record. Must be inside a transaction."""
     _assert_in_transaction(conn)
@@ -60,17 +188,22 @@ async def log_admin_action(
         """
         INSERT INTO admin_logs
             (id, admin_id, action, target_type, target_id,
-             old_value, new_value, ip_address, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             old_value, new_value, ip_address,
+             command_id, job_id, request_id, trace_id, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         """,
         log_id,
         admin_id,
         action,
         target_type,
         target_id,
-        json.dumps(old_value) if old_value is not None else None,
-        json.dumps(new_value) if new_value is not None else None,
+        json.dumps(_json_safe(old_value)) if old_value is not None else None,
+        json.dumps(_json_safe(new_value)) if new_value is not None else None,
         ip_address,
+        command_id,
+        job_id,
+        request_id,
+        trace_id,
         now,
     )
 
@@ -90,6 +223,7 @@ async def list_users(
     page: int = 1,
     page_size: int = 50,
     role_filter: Optional[str] = None,
+    search: Optional[str] = None,
 ) -> dict:
     """Return paginated list of users for the admin dashboard."""
     base = "FROM users WHERE 1=1"
@@ -99,6 +233,11 @@ async def list_users(
     if role_filter:
         base += f" AND role = ${idx}"
         args.append(role_filter)
+        idx += 1
+
+    if search and search.strip():
+        base += f" AND (username ILIKE ${idx} OR email ILIKE ${idx})"
+        args.append(f"%{_escape_like(search.strip())}%")
         idx += 1
 
     total = await conn.fetchval(f"SELECT COUNT(*) {base}", *args)
@@ -117,6 +256,52 @@ async def list_users(
 
     return {
         "users": [dict(r) for r in rows],
+        "total": int(total or 0),
+        "page": page,
+        "page_size": page_size,
+        "has_more": page * page_size < (total or 0),
+    }
+
+
+async def list_quests(
+    conn: asyncpg.Connection,
+    page: int = 1,
+    page_size: int = 50,
+    status_filter: Optional[str] = None,
+    search: Optional[str] = None,
+) -> dict:
+    """Return paginated list of quests for the admin dashboard."""
+    base = "FROM quests WHERE 1=1"
+    args: list = []
+    idx = 1
+
+    if status_filter:
+        base += f" AND status = ${idx}"
+        args.append(status_filter)
+        idx += 1
+
+    if search and search.strip():
+        base += f" AND (title ILIKE ${idx} OR id ILIKE ${idx})"
+        args.append(f"%{_escape_like(search.strip())}%")
+        idx += 1
+
+    total = await conn.fetchval(f"SELECT COUNT(*) {base}", *args)
+
+    rows = await conn.fetch(
+        f"""
+        SELECT id, title, status, budget, currency, required_grade, is_urgent,
+               client_id, assigned_to, created_at, updated_at
+        {base}
+        ORDER BY created_at DESC
+        LIMIT ${idx} OFFSET ${idx + 1}
+        """,
+        *args,
+        page_size,
+        (page - 1) * page_size,
+    )
+
+    return {
+        "quests": [dict(r) for r in rows],
         "total": int(total or 0),
         "page": page,
         "page_size": page_size,
@@ -201,6 +386,10 @@ async def approve_withdrawal(
     transaction_id: str,
     admin_id: str,
     ip_address: Optional[str] = None,
+    command_id: Optional[str] = None,
+    job_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
 ) -> dict:
     """
     Mark a pending withdrawal as completed.
@@ -214,7 +403,7 @@ async def approve_withdrawal(
     _assert_in_transaction(conn)
 
     tx = await conn.fetchrow(
-        "SELECT * FROM transactions WHERE id = $1 FOR UPDATE",
+        "SELECT id, type, status FROM transactions WHERE id = $1 FOR UPDATE",
         transaction_id,
     )
     if not tx:
@@ -240,6 +429,10 @@ async def approve_withdrawal(
         old_value={"status": "pending"},
         new_value={"status": "completed"},
         ip_address=ip_address,
+        command_id=command_id,
+        job_id=job_id,
+        request_id=request_id,
+        trace_id=trace_id,
     )
 
     logger.info(
@@ -251,7 +444,7 @@ async def approve_withdrawal(
         "transaction_id": transaction_id,
         "status": "completed",
         "user_id": tx["user_id"],
-        "amount": float(tx["amount"]),
+        "amount": tx["amount"],
         "currency": tx["currency"],
     }
 
@@ -262,6 +455,10 @@ async def reject_withdrawal(
     admin_id: str,
     reason: str,
     ip_address: Optional[str] = None,
+    command_id: Optional[str] = None,
+    job_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
 ) -> dict:
     """
     Reject a pending withdrawal and **refund** the amount back to the user.
@@ -274,7 +471,7 @@ async def reject_withdrawal(
     _assert_in_transaction(conn)
 
     tx = await conn.fetchrow(
-        "SELECT * FROM transactions WHERE id = $1 FOR UPDATE",
+        "SELECT id, type, status FROM transactions WHERE id = $1 FOR UPDATE",
         transaction_id,
     )
     if not tx:
@@ -295,7 +492,7 @@ async def reject_withdrawal(
     new_balance = await wallet_service.credit(
         conn,
         user_id=tx["user_id"],
-        amount=float(tx["amount"]),
+        amount=tx["amount"],
         currency=tx["currency"],
         tx_type="refund",
     )
@@ -307,8 +504,12 @@ async def reject_withdrawal(
         target_type="transaction",
         target_id=transaction_id,
         old_value={"status": "pending"},
-        new_value={"status": "rejected", "reason": reason, "refunded_amount": float(tx["amount"])},
+        new_value={"status": "rejected", "reason": reason, "refunded_amount": str(tx["amount"])},
         ip_address=ip_address,
+        command_id=command_id,
+        job_id=job_id,
+        request_id=request_id,
+        trace_id=trace_id,
     )
 
     logger.info(
@@ -320,7 +521,7 @@ async def reject_withdrawal(
         "transaction_id": transaction_id,
         "status": "rejected",
         "user_id": tx["user_id"],
-        "amount": float(tx["amount"]),
+        "amount": tx["amount"],
         "currency": tx["currency"],
         "reason": reason,
         "new_balance": new_balance,
@@ -381,12 +582,14 @@ async def cleanup_old_notifications(conn: asyncpg.Connection) -> int:
     Safe to run outside a transaction (single-statement DELETE).
     Returns the number of rows deleted.
     """
+    # P1 H-01 FIX: Use parameterized query instead of f-string for SQL safety
     result = await conn.execute(
-        f"""
+        """
         DELETE FROM notifications
         WHERE is_read = TRUE
-          AND created_at < NOW() - INTERVAL '{settings.NOTIFICATION_RETENTION_DAYS} days'
+          AND created_at < NOW() - make_interval(days => $1)
         """,
+        settings.NOTIFICATION_RETENTION_DAYS,
     )
     try:
         count = int(result.split()[-1])
@@ -403,11 +606,15 @@ async def cleanup_old_notifications(conn: asyncpg.Connection) -> int:
 
 async def get_user_detail(conn: asyncpg.Connection, user_id: str) -> dict:
     """Full user profile + wallets + class info + badges for admin view."""
-    user = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+    user = await conn.fetchrow(
+        f"SELECT {_ADMIN_USER_DETAIL_COLUMNS} FROM users WHERE id = $1",
+        user_id,
+    )
     if not user:
         raise ValueError(f"User {user_id} not found")
 
     user_dict = dict(user)
+    user_dict["skills"] = _normalize_json_list(user_dict.get("skills"))
 
     # Wallets
     wallets = await conn.fetch(
@@ -431,7 +638,22 @@ async def get_user_detail(conn: asyncpg.Connection, user_id: str) -> dict:
     cp = await conn.fetchrow(
         "SELECT * FROM user_class_progress WHERE user_id = $1", user_id
     )
-    user_dict["class_progress"] = dict(cp) if cp else None
+    if cp:
+        cp_dict = dict(cp)
+        cfg = get_class_config(cp_dict["class_id"])
+        bonus_perk_points = cp_dict.get("bonus_perk_points", 0)
+        perk_points_total = bonus_perk_points
+        if cfg is not None:
+            perk_points_total += calculate_perk_points_available(
+                cp_dict.get("class_level", 1),
+                cfg.perk_points_per_level,
+            )
+        cp_dict["bonus_perk_points"] = bonus_perk_points
+        cp_dict["perk_points_total"] = perk_points_total
+        cp_dict["perk_points_available"] = perk_points_total - cp_dict.get("perk_points_spent", 0)
+        user_dict["class_progress"] = cp_dict
+    else:
+        user_dict["class_progress"] = None
 
     # Perks
     perks = await conn.fetch(
@@ -476,8 +698,19 @@ async def update_user(
     """
     _assert_in_transaction(conn)
 
+    # P0 F-03: prevent self-modification
+    if user_id == admin_id:
+        raise ValueError("Cannot modify your own account")
+
+    # P0 F-04: block role escalation to admin
+    if fields.get("role") == "admin":
+        raise ValueError("Cannot set role to admin via update_user")
+
     # Fetch old values
-    old_row = await conn.fetchrow("SELECT * FROM users WHERE id = $1 FOR UPDATE", user_id)
+    old_row = await conn.fetchrow(
+        f"SELECT {_ADMIN_USER_UPDATE_COLUMNS} FROM users WHERE id = $1 FOR UPDATE",
+        user_id,
+    )
     if not old_row:
         raise ValueError(f"User {user_id} not found")
 
@@ -491,10 +724,11 @@ async def update_user(
         if key not in _USER_UPDATABLE_FIELDS:
             continue
         old_val = old_row.get(key)
-        if key == "skills" and isinstance(value, list):
+        if key == "skills":
+            value = _normalize_admin_skills(value)
             value = json.dumps(value)
         old_values[key] = old_val if not isinstance(old_val, (datetime,)) else str(old_val)
-        new_values[key] = value
+        new_values[key] = json.loads(value) if key == "skills" else value
         set_clauses.append(f"{key} = ${idx}")
         args.append(value)
         idx += 1
@@ -551,15 +785,26 @@ async def ban_user(
         reason, now, user_id,
     )
 
-    # Cancel all active quests where user is assigned
-    cancelled = await conn.execute(
+    quests_to_cancel = await conn.fetch(
         """
-        UPDATE quests SET status = 'cancelled', updated_at = $1
-        WHERE assigned_to = $2 AND status IN ('open', 'in_progress')
+        SELECT id, title, client_id, assigned_to, status, currency
+        FROM quests
+        WHERE (assigned_to = $1 OR client_id = $1)
+          AND status IN ('open', 'assigned', 'in_progress', 'revision_requested')
+        FOR UPDATE
         """,
-        now, user_id,
+        user_id,
     )
-    cancelled_count = int(cancelled.split()[-1]) if cancelled else 0
+    cancelled_count = 0
+    for quest in quests_to_cancel:
+        await _cancel_quest_with_invariants(
+            conn,
+            quest,
+            admin_id=admin_id,
+            note=f"Quest cancelled because user {user_id} was banned: {reason}",
+            user_message=f"Квест «{quest['title']}» был отменён администратором. Причина: {reason}",
+        )
+        cancelled_count += 1
 
     await log_admin_action(
         conn, admin_id=admin_id, action="user_banned",
@@ -649,13 +894,50 @@ async def delete_user(
     if row["role"] == "admin":
         raise ValueError("Cannot delete an admin account")
 
-    # Cancel active quests
-    await conn.execute(
-        "UPDATE quests SET status = 'cancelled', updated_at = NOW() WHERE assigned_to = $1 AND status IN ('open', 'in_progress')",
+    quests_to_cancel = await conn.fetch(
+        """
+        SELECT id, title, client_id, assigned_to, status, currency
+        FROM quests
+        WHERE (assigned_to = $1 OR client_id = $1)
+          AND status IN ('open', 'assigned', 'in_progress', 'revision_requested')
+        FOR UPDATE
+        """,
         user_id,
     )
+    for quest in quests_to_cancel:
+        await _cancel_quest_with_invariants(
+            conn,
+            quest,
+            admin_id=admin_id,
+            note=f"Quest cancelled because user {user_id} is being deleted",
+            user_message=f"Квест «{quest['title']}» был отменён администратором из-за удаления пользователя.",
+        )
+
+    client_quest_transaction_tail = await conn.fetchval(
+        """
+        SELECT COUNT(*)
+        FROM transactions t
+        JOIN quests q ON q.id = t.quest_id
+        WHERE q.client_id = $1
+        """,
+        user_id,
+    )
+    if int(client_quest_transaction_tail or 0) > 0:
+        raise ValueError("Cannot delete user with client-owned quests that have financial transaction history")
+
+    # Remove quests owned by user (client_id ON DELETE RESTRICT requires explicit cleanup).
+    # CASCADE will handle applications, messages, reviews linked to these quests.
+    await conn.execute("DELETE FROM quests WHERE client_id = $1", user_id)
+
+    # P0 D-04 FIX: Preserve audit trail — set target_id to NULL instead of deleting
     await conn.execute(
-        "UPDATE quests SET status = 'cancelled', updated_at = NOW() WHERE client_id = $1 AND status IN ('open', 'in_progress')",
+        "UPDATE admin_logs SET target_id = NULL WHERE target_type = 'user' AND target_id = $1",
+        user_id,
+    )
+
+    # P0 D-04 FIX: Preserve financial records — set user_id to NULL instead of cascade-deleting
+    await conn.execute(
+        "UPDATE transactions SET user_id = NULL WHERE user_id = $1",
         user_id,
     )
 
@@ -689,6 +971,10 @@ async def grant_xp(
     """Grant XP to a user. Triggers level-up and grade promotion checks."""
     _assert_in_transaction(conn)
 
+    # P0 F-03: prevent self-XP-grant
+    if user_id == admin_id:
+        raise ValueError("Cannot grant XP to yourself")
+
     row = await conn.fetchrow(
         "SELECT id, username, xp, level, grade, stats_int, stats_dex, stats_cha FROM users WHERE id = $1 FOR UPDATE",
         user_id,
@@ -704,7 +990,7 @@ async def grant_xp(
 
     # Check level-up
     grade_enum = GradeEnum(old_grade)
-    level_up, new_grade_enum, new_level = check_level_up(new_xp, grade_enum)
+    level_up, new_grade_enum, new_level, _ = check_level_up(new_xp, grade_enum)
     new_grade = new_grade_enum.value
     xp_to_next_val = calculate_xp_to_next(new_xp, new_grade_enum)
 
@@ -718,7 +1004,7 @@ async def grant_xp(
         """
         UPDATE users
         SET xp = $1, level = $2, grade = $3, xp_to_next = $4,
-            stats_int = stats_int + $5, stats_dex = stats_dex + $6, stats_cha = stats_cha + $7,
+            stats_int = LEAST(stats_int + $5, 100), stats_dex = LEAST(stats_dex + $6, 100), stats_cha = LEAST(stats_cha + $7, 100),
             updated_at = $8
         WHERE id = $9
         """,
@@ -761,7 +1047,7 @@ async def grant_xp(
 async def adjust_wallet(
     conn: asyncpg.Connection,
     user_id: str,
-    amount: float,
+    amount: Decimal,
     currency: str,
     reason: str,
     admin_id: str,
@@ -773,6 +1059,12 @@ async def adjust_wallet(
     """
     _assert_in_transaction(conn)
 
+    # P0 F-03: prevent self-wallet-adjustment
+    if user_id == admin_id:
+        raise ValueError("Cannot adjust your own wallet")
+
+    amount = wallet_service.quantize_money(amount)
+
     row = await conn.fetchrow("SELECT id, username FROM users WHERE id = $1", user_id)
     if not row:
         raise ValueError(f"User {user_id} not found")
@@ -781,11 +1073,11 @@ async def adjust_wallet(
 
     if amount > 0:
         new_balance = await wallet_service.credit(
-            conn, user_id=user_id, amount=amount, currency=currency, tx_type="income",
+            conn, user_id=user_id, amount=amount, currency=currency, tx_type="admin_adjust",
         )
     elif amount < 0:
         new_balance = await wallet_service.debit(
-            conn, user_id=user_id, amount=abs(amount), currency=currency, tx_type="expense",
+            conn, user_id=user_id, amount=abs(amount), currency=currency, tx_type="admin_adjust",
         )
     else:
         raise ValueError("Amount must be non-zero")
@@ -825,6 +1117,7 @@ async def get_quest_detail(conn: asyncpg.Connection, quest_id: str) -> dict:
         raise ValueError(f"Quest {quest_id} not found")
 
     quest_dict = dict(quest)
+    quest_dict["skills"] = _normalize_json_list(quest_dict.get("skills"))
 
     apps = await conn.fetch(
         "SELECT * FROM applications WHERE quest_id = $1 ORDER BY created_at DESC", quest_id
@@ -845,10 +1138,48 @@ async def update_quest(
     _assert_in_transaction(conn)
 
     allowed_fields = {"title", "description", "budget", "xp_reward", "required_grade", "status", "assigned_to", "is_urgent", "deadline", "required_portfolio"}
+    protected_financial_fields = {"budget", "status", "assigned_to"}
 
     old_row = await conn.fetchrow("SELECT * FROM quests WHERE id = $1 FOR UPDATE", quest_id)
     if not old_row:
         raise ValueError(f"Quest {quest_id} not found")
+
+    requested_fields = {key for key in fields if key in allowed_fields}
+    if requested_fields & protected_financial_fields:
+        hold_row = await conn.fetchrow(
+            """
+            SELECT id FROM transactions
+            WHERE quest_id = $1 AND type = 'hold' AND status = 'held'
+            LIMIT 1
+            """,
+            quest_id,
+        )
+        financialized = bool(hold_row) or bool(old_row.get("assigned_to")) or old_row.get("status") not in {"draft", "open"}
+        if financialized:
+            blocked = ", ".join(sorted(requested_fields & protected_financial_fields))
+            raise ValueError(f"Cannot update {blocked} after escrow hold exists or quest is already financialized")
+
+    # Validate status transitions
+    if "status" in fields and fields["status"] in allowed_fields:
+        pass  # field is in allowed_fields — checked below
+    if "status" in fields:
+        new_status = fields["status"]
+        if new_status not in QuestStatusEnum.__members__:
+            raise ValueError(f"Invalid status: {new_status}")
+        current_status = old_row["status"]
+        _ALLOWED_TRANSITIONS: Dict[str, set] = {
+            "draft": {"open", "cancelled"},
+            "open": {"draft", "assigned", "cancelled"},
+            "assigned": {"in_progress", "open", "cancelled"},
+            "in_progress": {"completed", "cancelled"},
+            "completed": {"confirmed", "revision_requested", "cancelled"},
+            "revision_requested": {"in_progress", "completed", "cancelled"},
+            "confirmed": set(),
+            "cancelled": set(),
+        }
+        allowed_next = _ALLOWED_TRANSITIONS.get(current_status, set())
+        if new_status not in allowed_next:
+            raise ValueError(f"Cannot transition quest from '{current_status}' to '{new_status}'")
 
     old_values = {}
     new_values = {}
@@ -915,37 +1246,21 @@ async def force_cancel_quest(
         raise ValueError(f"Quest {quest_id} is already cancelled")
 
     old_status = row["status"]
-    now = datetime.now(timezone.utc)
-
-    await conn.execute(
-        "UPDATE quests SET status = 'cancelled', updated_at = $1 WHERE id = $2",
-        now, quest_id,
+    refund_result = await _cancel_quest_with_invariants(
+        conn,
+        row,
+        admin_id=admin_id,
+        note=f"Quest force-cancelled by admin: {reason}",
+        user_message=f"Квест «{row['title']}» был принудительно отменён. Причина: {reason}",
     )
 
     await log_admin_action(
         conn, admin_id=admin_id, action="quest_force_cancelled",
         target_type="quest", target_id=quest_id,
         old_value={"status": old_status},
-        new_value={"status": "cancelled", "reason": reason},
+        new_value={"status": "cancelled", "reason": reason, "escrow_refunded": refund_result},
         ip_address=ip_address,
     )
-
-    # Notify client
-    await notification_service.create_notification(
-        conn, user_id=row["client_id"],
-        title="Квест отменён администратором",
-        message=f"Квест «{row['title']}» был принудительно отменён. Причина: {reason}",
-        event_type="admin_quest_cancelled",
-    )
-
-    # Notify freelancer if assigned
-    if row["assigned_to"]:
-        await notification_service.create_notification(
-            conn, user_id=row["assigned_to"],
-            title="Квест отменён администратором",
-            message=f"Квест «{row['title']}» был принудительно отменён. Причина: {reason}",
-            event_type="admin_quest_cancelled",
-        )
 
     logger.warning(f"Admin {admin_id} force-cancelled quest {quest_id}: {reason}")
     return {
@@ -960,8 +1275,13 @@ async def force_complete_quest(
     reason: str,
     admin_id: str,
     ip_address: Optional[str] = None,
+    skip_escrow: bool = False,
 ) -> dict:
-    """Force-complete a quest (set status to 'confirmed'). Does NOT trigger payment/XP — that's admin's choice via separate endpoints."""
+    """Force-complete a quest: set status to 'confirmed' AND trigger payment + XP.
+
+    P2 Q-01 FIX: Previously skipped payment/XP, leaving the freelancer unpaid.
+    Now performs the same reward logic as confirm_quest_completion.
+    """
     _assert_in_transaction(conn)
 
     row = await conn.fetchrow("SELECT * FROM quests WHERE id = $1 FOR UPDATE", quest_id)
@@ -969,6 +1289,10 @@ async def force_complete_quest(
         raise ValueError(f"Quest {quest_id} not found")
     if row["status"] in ("confirmed", "cancelled"):
         raise ValueError(f"Quest {quest_id} is already {row['status']}")
+
+    # P1 Q-06: only allow force-complete for quests that have work in progress
+    if row["status"] in ("draft", "open"):
+        raise ValueError(f"Cannot force-complete quest in '{row['status']}' status — no work has been done")
 
     old_status = row["status"]
     now = datetime.now(timezone.utc)
@@ -978,11 +1302,127 @@ async def force_complete_quest(
         now, quest_id,
     )
 
+    # Trigger payment + XP if freelancer is assigned
+    split_result = None
+    xp_reward = 0
+    guild_economy_result = None
+    if row["assigned_to"]:
+        hold_row = await conn.fetchrow(
+            """
+            SELECT id FROM transactions
+            WHERE user_id = $1 AND quest_id = $2 AND type = 'hold' AND status = 'held' AND currency = $3
+            FOR UPDATE
+            """,
+            row["client_id"],
+            quest_id,
+            row.get("currency", "RUB"),
+        )
+        if not hold_row:
+            if not skip_escrow:
+                raise ValueError(
+                    "Admin force-complete requires an active escrow hold. "
+                    "Pass skip_escrow=True to override (no payment will be made to freelancer)."
+                )
+            logger.warning(
+                f"[AUDIT] Admin force-complete with no escrow hold: "
+                f"quest={quest_id}, admin action, skip_escrow=True"
+            )
+
+        # XP reward for freelancer
+        freelancer_row = await conn.fetchrow(
+            f"SELECT {_USER_PROGRESS_COLUMNS} FROM users WHERE id = $1 FOR UPDATE",
+            row["assigned_to"],
+        )
+        if freelancer_row:
+            from app.core.rewards import calculate_quest_rewards as _calc_rewards
+            quest_grade = GradeEnum(row["required_grade"])
+            freelancer_grade = GradeEnum(freelancer_row["grade"])
+            xp_reward = _calc_rewards(
+                budget=row["budget"], quest_grade=quest_grade,
+                user_grade=freelancer_grade,
+            )
+            new_xp = freelancer_row["xp"] + xp_reward
+            level_up, new_grade, new_level, _ = check_level_up(new_xp, freelancer_grade)
+            new_xp_to_next = calculate_xp_to_next(new_xp, new_grade)
+            levels_gained = new_level - freelancer_row["level"]
+            stat_delta = allocate_stat_points(levels_gained) if levels_gained > 0 else {"int": 0, "dex": 0, "cha": 0, "unspent": 0}
+            _STAT_CAP = 100
+            new_stats_int = min(_STAT_CAP, freelancer_row["stats_int"] + stat_delta["int"])
+            new_stats_dex = min(_STAT_CAP, freelancer_row["stats_dex"] + stat_delta["dex"])
+            new_stats_cha = min(_STAT_CAP, freelancer_row["stats_cha"] + stat_delta["cha"])
+            new_stat_points = freelancer_row.get("stat_points", 0) + stat_delta["unspent"]
+            await conn.execute(
+                """UPDATE users SET xp=$1, level=$2, grade=$3, xp_to_next=$4,
+                       stats_int=$5, stats_dex=$6, stats_cha=$7,
+                       stat_points=stat_points+$8, updated_at=$9
+                   WHERE id=$10""",
+                new_xp, new_level, new_grade.value, new_xp_to_next,
+                new_stats_int, new_stats_dex, new_stats_cha, stat_delta["unspent"],
+                now, row["assigned_to"],
+            )
+
+            # Badge check (matching confirm_quest_completion)
+            badge_event_data = {
+                "quests_completed": await conn.fetchval(
+                    "SELECT COUNT(*) FROM quests WHERE assigned_to = $1 AND status = 'confirmed'",
+                    row["assigned_to"],
+                ),
+                "xp": new_xp,
+                "level": new_level,
+                "grade": new_grade.value,
+                "earnings": row["budget"],
+            }
+            await badge_service.check_and_award(
+                conn, row["assigned_to"], "quest_completed", badge_event_data
+            )
+
+            # Class XP (matching confirm_quest_completion)
+            await class_service.add_class_xp(
+                conn, row["assigned_to"],
+                xp_reward,
+                is_urgent=bool(row["is_urgent"]) if "is_urgent" in row.keys() else False,
+                required_portfolio=bool(row.get("required_portfolio", False)),
+            )
+
+        # Payment split — only if escrow hold exists
+        if hold_row:
+            split_result = await wallet_service.split_payment(
+                conn,
+                client_id=row["client_id"],
+                freelancer_id=row["assigned_to"],
+                gross_amount=row["budget"],
+                currency=row.get("currency", "RUB"),
+                quest_id=quest_id,
+                fee_percent=row.get("platform_fee_percent"),
+            )
+            guild_economy_result = await guild_economy_service.apply_quest_completion_rewards(
+                conn,
+                quest_id=quest_id,
+                freelancer_id=row["assigned_to"],
+                gross_amount=row["budget"],
+                platform_fee=split_result["platform_fee"],
+                xp_reward=xp_reward,
+                is_urgent=bool(row["is_urgent"]) if "is_urgent" in row else False,
+                confirmed_at=now,
+                source="admin_force_complete",
+            )
+            if guild_economy_result is None:
+                await guild_economy_service.award_solo_artifact_drop(
+                    conn,
+                    quest_id=quest_id,
+                    freelancer_id=row["assigned_to"],
+                    gross_amount=row["budget"],
+                    platform_fee=split_result["platform_fee"],
+                    xp_reward=xp_reward,
+                    is_urgent=bool(row["is_urgent"]) if "is_urgent" in row else False,
+                    confirmed_at=now,
+                )
+
     await log_admin_action(
         conn, admin_id=admin_id, action="quest_force_completed",
         target_type="quest", target_id=quest_id,
         old_value={"status": old_status},
-        new_value={"status": "confirmed", "reason": reason},
+        new_value={"status": "confirmed", "reason": reason, "payment_triggered": split_result is not None},
         ip_address=ip_address,
     )
 
@@ -1006,6 +1446,16 @@ async def force_complete_quest(
     return {
         "quest_id": quest_id, "old_status": old_status,
         "new_status": "confirmed", "reason": reason,
+        "payment_triggered": split_result is not None,
+        "xp_reward": xp_reward,
+        "guild_economy": None if not guild_economy_result else {
+            "guild_id": guild_economy_result["guild_id"],
+            "guild_name": guild_economy_result["guild_name"],
+            "treasury_delta": wallet_service.quantize_money(guild_economy_result["treasury_delta"]),
+            "guild_tokens_delta": guild_economy_result["guild_tokens_delta"],
+            "contribution_delta": guild_economy_result["contribution_delta"],
+            "card_drop": guild_economy_result.get("card_drop"),
+        },
     }
 
 
@@ -1021,6 +1471,23 @@ async def delete_quest(
     row = await conn.fetchrow("SELECT id, title, client_id, status FROM quests WHERE id = $1 FOR UPDATE", quest_id)
     if not row:
         raise ValueError(f"Quest {quest_id} not found")
+
+    active_hold_count = await conn.fetchval(
+        """
+        SELECT COUNT(*) FROM transactions
+        WHERE quest_id = $1 AND type = 'hold' AND status = 'held'
+        """,
+        quest_id,
+    )
+    if int(active_hold_count or 0) > 0:
+        raise ValueError("Cannot delete quest with active escrow hold; cancel and unwind funds first")
+
+    transaction_count = await conn.fetchval(
+        "SELECT COUNT(*) FROM transactions WHERE quest_id = $1",
+        quest_id,
+    )
+    if int(transaction_count or 0) > 0:
+        raise ValueError("Cannot delete financialized quest with transaction history")
 
     await conn.execute("DELETE FROM quests WHERE id = $1", quest_id)
 
@@ -1125,6 +1592,84 @@ async def revoke_badge(
     return {"user_id": user_id, "badge_id": badge_id, "revoked": True}
 
 
+async def upsert_guild_season_reward_config(
+    conn: asyncpg.Connection,
+    payload: dict[str, Any],
+    admin_id: str,
+    ip_address: Optional[str] = None,
+) -> dict[str, Any]:
+    _assert_in_transaction(conn)
+
+    season_code = str(payload["season_code"]).strip()
+    family = str(payload["family"]).strip()
+    family_meta = guild_card_service.SEASONAL_FAMILY_SETS.get(family)
+    if not family_meta:
+        raise ValueError(f"Unknown guild seasonal family: {family}")
+
+    treasury_bonus = wallet_service.quantize_money(payload["treasury_bonus"])
+    now = datetime.now(timezone.utc)
+    existing = await conn.fetchrow(
+        """
+        SELECT id, season_code, family, label, accent, treasury_bonus, guild_tokens_bonus, badge_name, is_active
+        FROM guild_season_reward_configs
+        WHERE season_code = $1 AND family = $2
+        """,
+        season_code,
+        family,
+    )
+
+    config_id = str(existing["id"]) if existing else f"gsrc_{uuid.uuid4().hex[:12]}"
+    row = await conn.fetchrow(
+        """
+        INSERT INTO guild_season_reward_configs (
+            id, season_code, family, label, accent, treasury_bonus,
+            guild_tokens_bonus, badge_name, is_active, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+        ON CONFLICT (season_code, family) DO UPDATE
+            SET label = EXCLUDED.label,
+                accent = EXCLUDED.accent,
+                treasury_bonus = EXCLUDED.treasury_bonus,
+                guild_tokens_bonus = EXCLUDED.guild_tokens_bonus,
+                badge_name = EXCLUDED.badge_name,
+                is_active = EXCLUDED.is_active,
+                updated_at = EXCLUDED.updated_at
+        RETURNING id, season_code, family, label, accent, treasury_bonus, guild_tokens_bonus, badge_name, is_active, created_at, updated_at
+        """,
+        config_id,
+        season_code,
+        family,
+        str(payload["label"]).strip(),
+        str(payload["accent"]).strip(),
+        treasury_bonus,
+        int(payload["guild_tokens_bonus"]),
+        str(payload["badge_name"]).strip(),
+        bool(payload.get("is_active", True)),
+        now,
+    )
+
+    await log_admin_action(
+        conn,
+        admin_id=admin_id,
+        action="guild_season_reward_config_upserted",
+        target_type="guild_season_reward_config",
+        target_id=f"{season_code}:{family}",
+        old_value=dict(existing) if existing else None,
+        new_value={
+            "season_code": row["season_code"],
+            "family": row["family"],
+            "label": row["label"],
+            "accent": row["accent"],
+            "treasury_bonus": row["treasury_bonus"],
+            "guild_tokens_bonus": row["guild_tokens_bonus"],
+            "badge_name": row["badge_name"],
+            "is_active": row["is_active"],
+        },
+        ip_address=ip_address,
+    )
+
+    return dict(row)
+
+
 # ──────────────────────────────────────────────────────────────────────
 # GOD MODE — Class override
 # ──────────────────────────────────────────────────────────────────────
@@ -1201,6 +1746,109 @@ async def change_user_class(
     return {"user_id": user_id, "old_class": old_class, "new_class": class_id}
 
 
+async def grant_class_perk_points(
+    conn: asyncpg.Connection,
+    user_id: str,
+    amount: int,
+    reason: str,
+    admin_id: str,
+    ip_address: Optional[str] = None,
+) -> dict:
+    """Grant bonus perk points for a user's class tree without changing class level."""
+    _assert_in_transaction(conn)
+
+    if amount <= 0:
+        raise ValueError("Количество очков должно быть больше 0")
+
+    user_row = await conn.fetchrow(
+        "SELECT id, username, character_class FROM users WHERE id = $1 FOR UPDATE",
+        user_id,
+    )
+    if not user_row:
+        raise ValueError(f"User {user_id} not found")
+
+    class_id = user_row["character_class"]
+    if not class_id:
+        raise ValueError("У пользователя нет активного класса")
+
+    cfg = get_class_config(class_id)
+    if cfg is None:
+        raise ValueError(f"Неизвестный класс: {class_id}")
+
+    now = datetime.now(timezone.utc)
+    progress = await conn.fetchrow(
+        "SELECT class_level, perk_points_spent, bonus_perk_points FROM user_class_progress WHERE user_id = $1 FOR UPDATE",
+        user_id,
+    )
+
+    if progress:
+        old_bonus = progress.get("bonus_perk_points", 0)
+        class_level = progress.get("class_level", 1)
+        perk_points_spent = progress.get("perk_points_spent", 0)
+        new_bonus = old_bonus + amount
+        await conn.execute(
+            "UPDATE user_class_progress SET bonus_perk_points = $1, updated_at = $2 WHERE user_id = $3",
+            new_bonus,
+            now,
+            user_id,
+        )
+    else:
+        old_bonus = 0
+        class_level = 1
+        perk_points_spent = 0
+        new_bonus = amount
+        await conn.execute(
+            """
+            INSERT INTO user_class_progress (
+                user_id, class_id, class_xp, class_level, quests_completed,
+                consecutive_quests, perk_points_spent, bonus_perk_points, updated_at
+            )
+            VALUES ($1, $2, 0, 1, 0, 0, 0, $3, $4)
+            """,
+            user_id,
+            class_id,
+            new_bonus,
+            now,
+        )
+
+    perk_points_total = calculate_perk_points_available(class_level, cfg.perk_points_per_level) + new_bonus
+    perk_points_available = perk_points_total - perk_points_spent
+
+    await log_admin_action(
+        conn,
+        admin_id=admin_id,
+        action="class_perk_points_granted",
+        target_type="user",
+        target_id=user_id,
+        old_value={"bonus_perk_points": old_bonus},
+        new_value={
+            "bonus_perk_points": new_bonus,
+            "granted": amount,
+            "reason": reason,
+            "class_id": class_id,
+        },
+        ip_address=ip_address,
+    )
+
+    await notification_service.create_notification(
+        conn,
+        user_id=user_id,
+        title="Очки перков начислены администратором",
+        message=f"Вам начислено {amount} доп. очков перков для класса {cfg.name_ru}. Причина: {reason}",
+        event_type="admin_perk_points_granted",
+    )
+
+    return {
+        "user_id": user_id,
+        "class_id": class_id,
+        "granted": amount,
+        "old_bonus_perk_points": old_bonus,
+        "new_bonus_perk_points": new_bonus,
+        "perk_points_total": perk_points_total,
+        "perk_points_available": perk_points_available,
+    }
+
+
 # ──────────────────────────────────────────────────────────────────────
 # GOD MODE — Broadcast notification
 # ──────────────────────────────────────────────────────────────────────
@@ -1217,10 +1865,21 @@ async def broadcast_notification(
     """Send a notification to multiple users."""
     _assert_in_transaction(conn)
 
+    recipient_ids = user_ids
+    if not recipient_ids:
+        rows = await conn.fetch("SELECT id FROM users")
+        recipient_ids = [str(row["id"]) for row in rows]
+
+    # P1-2 FIX: Batch-validate all user IDs in one query instead of N+1
+    valid_ids_rows = await conn.fetch(
+        "SELECT id FROM users WHERE id = ANY($1::text[])",
+        recipient_ids,
+    )
+    valid_ids = {str(row["id"]) for row in valid_ids_rows}
+
     sent = 0
-    for uid in user_ids:
-        exists = await conn.fetchval("SELECT id FROM users WHERE id = $1", uid)
-        if exists:
+    for uid in recipient_ids:
+        if uid in valid_ids:
             await notification_service.create_notification(
                 conn, user_id=uid, title=title, message=message, event_type=event_type,
             )
@@ -1230,11 +1889,11 @@ async def broadcast_notification(
         conn, admin_id=admin_id, action="notification_broadcast",
         target_type="system", target_id="broadcast",
         old_value=None,
-        new_value={"recipients": len(user_ids), "sent": sent, "title": title},
+        new_value={"recipients": len(recipient_ids), "sent": sent, "title": title},
         ip_address=ip_address,
     )
 
-    return {"total_recipients": len(user_ids), "sent": sent, "title": title}
+    return {"total_recipients": len(recipient_ids), "sent": sent, "title": title}
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1278,7 +1937,7 @@ async def get_platform_stats(conn: asyncpg.Connection) -> dict:
         "quests_by_status": {r["status"]: r["cnt"] for r in quests_by_status},
         "total_transactions": total_transactions,
         "pending_withdrawals": pending_withdrawals,
-        "total_revenue": float(total_revenue),
+        "total_revenue": total_revenue,
         "users_today": users_today,
         "quests_today": quests_today,
     }

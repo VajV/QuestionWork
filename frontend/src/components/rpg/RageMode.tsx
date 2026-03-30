@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "@/lib/motion";
 import type { AbilityInfo } from "@/lib/api";
 import { activateAbility } from "@/lib/api";
 

@@ -2,6 +2,7 @@
 
 import asyncio
 import pytest
+from decimal import Decimal
 
 from app.core.events import EventBus, QuestCompleted, QuestTaken, LevelUp, ClassLevelUp
 
@@ -40,7 +41,7 @@ class TestEventBus:
             quest_id="q1",
             base_xp=100,
             final_xp=120,
-            quest_budget=5000.0,
+            quest_budget=Decimal("5000"),
             is_urgent=True,
             quest_grade="novice",
             user_grade="novice",
@@ -83,7 +84,7 @@ class TestEventDataclasses:
     def test_quest_completed_fields(self):
         e = QuestCompleted(
             user_id="u1", quest_id="q1", base_xp=100, final_xp=120,
-            quest_budget=5000.0, is_urgent=False, quest_grade="novice", user_grade="junior",
+            quest_budget=Decimal("5000"), is_urgent=False, quest_grade="novice", user_grade="junior",
         )
         assert e.user_id == "u1"
         assert e.base_xp == 100

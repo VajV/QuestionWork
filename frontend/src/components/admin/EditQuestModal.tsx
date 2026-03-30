@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "@/lib/motion";
 import {
   X,
   Save,
@@ -19,12 +19,24 @@ import {
   adminForceComplete,
   adminDeleteQuest,
 } from "@/lib/api";
+import type { ApiError } from "@/lib/api";
 import type { AdminQuestDetail } from "@/types";
 
 interface Props {
   questId: string;
   onClose: () => void;
   onUpdated: () => void;
+}
+
+function getApiErrorMessage(error: unknown, fallback = "Ошибка"): string {
+  const apiError = error as Partial<ApiError>;
+  if (typeof apiError.detail === "string" && apiError.detail.trim()) {
+    return apiError.detail;
+  }
+  if (typeof apiError.message === "string" && apiError.message.trim()) {
+    return apiError.message;
+  }
+  return fallback;
 }
 
 function Toast({ msg, type }: { msg: string; type: "ok" | "err" }) {
@@ -45,8 +57,10 @@ function Toast({ msg, type }: { msg: string; type: "ok" | "err" }) {
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   open: { label: "Открыт", color: "text-green-400" },
+  assigned: { label: "Назначен", color: "text-cyan-300" },
   in_progress: { label: "В работе", color: "text-blue-400" },
   completed: { label: "Выполнен", color: "text-yellow-400" },
+  revision_requested: { label: "На доработке", color: "text-orange-300" },
   confirmed: { label: "Подтверждён", color: "text-purple-400" },
   cancelled: { label: "Отменён", color: "text-red-400" },
 };
@@ -82,7 +96,7 @@ export default function EditQuestModal({ questId, onClose, onUpdated }: Props) {
       setQuest(data);
       setTitle(data.title);
       setDescription(data.description);
-      setBudget(Number(data.budget));
+      setBudget(data.budget);
       setXpReward(data.xp_reward);
       setRequiredGrade(data.required_grade);
       setIsUrgent(data.is_urgent);
@@ -105,7 +119,7 @@ export default function EditQuestModal({ questId, onClose, onUpdated }: Props) {
       const fields: Record<string, unknown> = {};
       if (title !== quest.title) fields.title = title;
       if (description !== quest.description) fields.description = description;
-      if (budget !== Number(quest.budget)) fields.budget = budget;
+      if (budget !== quest.budget) fields.budget = budget;
       if (xpReward !== quest.xp_reward) fields.xp_reward = xpReward;
       if (requiredGrade !== quest.required_grade) fields.required_grade = requiredGrade;
       if (isUrgent !== quest.is_urgent) fields.is_urgent = isUrgent;
@@ -118,8 +132,7 @@ export default function EditQuestModal({ questId, onClose, onUpdated }: Props) {
       await loadQuest();
       onUpdated();
     } catch (e: unknown) {
-      const msg = e instanceof Response ? e.statusText : String(e);
-      flash(msg || "Ошибка", "err");
+      flash(getApiErrorMessage(e), "err");
     } finally {
       setSaving(false);
     }
@@ -127,6 +140,7 @@ export default function EditQuestModal({ questId, onClose, onUpdated }: Props) {
 
   const handleForceCancel = async () => {
     if (forceReason.length < 3) { flash("Введите причину (мин. 3 символа)", "err"); return; }
+    if (!window.confirm("Вы уверены? Квест будет принудительно отменён.")) return;
     setSaving(true);
     try {
       const r = await adminForceCancel(questId, forceReason);
@@ -135,8 +149,7 @@ export default function EditQuestModal({ questId, onClose, onUpdated }: Props) {
       await loadQuest();
       onUpdated();
     } catch (e: unknown) {
-      const msg = e instanceof Response ? e.statusText : String(e);
-      flash(msg || "Ошибка", "err");
+      flash(getApiErrorMessage(e), "err");
     } finally {
       setSaving(false);
     }
@@ -144,6 +157,7 @@ export default function EditQuestModal({ questId, onClose, onUpdated }: Props) {
 
   const handleForceComplete = async () => {
     if (forceReason.length < 3) { flash("Введите причину (мин. 3 символа)", "err"); return; }
+    if (!window.confirm("Вы уверены? Квест будет принудительно завершён и фрилансеру начислена оплата.")) return;
     setSaving(true);
     try {
       const r = await adminForceComplete(questId, forceReason);
@@ -152,8 +166,7 @@ export default function EditQuestModal({ questId, onClose, onUpdated }: Props) {
       await loadQuest();
       onUpdated();
     } catch (e: unknown) {
-      const msg = e instanceof Response ? e.statusText : String(e);
-      flash(msg || "Ошибка", "err");
+      flash(getApiErrorMessage(e), "err");
     } finally {
       setSaving(false);
     }
@@ -168,8 +181,7 @@ export default function EditQuestModal({ questId, onClose, onUpdated }: Props) {
       onUpdated();
       setTimeout(onClose, 1000);
     } catch (e: unknown) {
-      const msg = e instanceof Response ? e.statusText : String(e);
-      flash(msg || "Ошибка", "err");
+      flash(getApiErrorMessage(e), "err");
     } finally {
       setSaving(false);
       setDeleteConfirm(false);
@@ -288,6 +300,39 @@ export default function EditQuestModal({ questId, onClose, onUpdated }: Props) {
                 </div>
               )}
 
+              {(quest.delivery_note || quest.delivery_url || quest.delivery_submitted_at || quest.revision_reason) && (
+                <div className="rounded-lg border border-cyan-900/40 bg-cyan-950/10 p-4 text-sm text-gray-300 space-y-3">
+                  <h3 className="font-semibold text-cyan-300">Сдача и правки</h3>
+                  {quest.delivery_submitted_at && (
+                    <div>
+                      <span className="text-gray-500">Сдано:</span>{" "}
+                      {new Date(quest.delivery_submitted_at).toLocaleString("ru-RU")}
+                    </div>
+                  )}
+                  {quest.delivery_note && (
+                    <div className="whitespace-pre-wrap rounded-lg border border-cyan-900/30 bg-black/20 p-3">
+                      {quest.delivery_note}
+                    </div>
+                  )}
+                  {quest.delivery_url && (() => { try { const p = new URL(quest.delivery_url).protocol; return p === 'http:' || p === 'https:'; } catch { return false; } })() && (
+                    <a href={quest.delivery_url} target="_blank" rel="noreferrer" className="text-cyan-300 hover:text-cyan-200 underline">
+                      Открыть результат
+                    </a>
+                  )}
+                  {quest.revision_reason && (
+                    <div className="rounded-lg border border-orange-900/40 bg-orange-950/20 p-3 text-orange-200 whitespace-pre-wrap">
+                      <div className="mb-1 text-xs uppercase tracking-wider text-orange-400">Причина доработки</div>
+                      {quest.revision_reason}
+                      {quest.revision_requested_at && (
+                        <div className="mt-2 text-xs text-orange-400/80">
+                          {new Date(quest.revision_requested_at).toLocaleString("ru-RU")}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Force actions */}
               <div className="rounded-lg border border-red-800/50 bg-red-900/10 p-4">
                 <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-red-400">
@@ -338,7 +383,29 @@ export default function EditQuestModal({ questId, onClose, onUpdated }: Props) {
                 {quest.completed_at && (
                   <div>Завершён: <span className="text-white">{new Date(quest.completed_at).toLocaleString()}</span></div>
                 )}
+                {quest.delivery_submitted_at && (
+                  <div>Результат сдан: <span className="text-white">{new Date(quest.delivery_submitted_at).toLocaleString()}</span></div>
+                )}
               </div>
+
+              {(quest.delivery_note || quest.delivery_url) && (
+                <div className="rounded-lg border border-cyan-800/40 bg-cyan-950/10 p-4 text-sm">
+                  <h3 className="mb-2 font-semibold text-cyan-300">Сдача результата</h3>
+                  {quest.delivery_note && (
+                    <p className="whitespace-pre-wrap text-gray-300">{quest.delivery_note}</p>
+                  )}
+                  {quest.delivery_url && (() => { try { const p = new URL(quest.delivery_url).protocol; return p === 'http:' || p === 'https:'; } catch { return false; } })() && (
+                    <a
+                      href={quest.delivery_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-block text-cyan-300 hover:text-cyan-200 underline"
+                    >
+                      Открыть результат
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex items-center justify-center py-20 text-red-400">

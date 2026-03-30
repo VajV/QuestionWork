@@ -60,7 +60,11 @@ logger = logging.getLogger("backup_db")
 
 
 def _parse_dsn(database_url: str) -> dict:
-    """Parse a postgres:// URL into pg_dump-friendly env vars."""
+    """Parse a postgres:// URL into pg_dump-friendly env vars.
+
+    Uses a temporary .pgpass file instead of PGPASSWORD environment variable
+    for better security (L-09).
+    """
     parsed = urlparse(database_url)
     env = os.environ.copy()
     if parsed.hostname:
@@ -69,10 +73,22 @@ def _parse_dsn(database_url: str) -> dict:
         env["PGPORT"] = str(parsed.port)
     if parsed.username:
         env["PGUSER"] = parsed.username
+
+    # L-09: Write password to a temp .pgpass file instead of env var
+    pgpass_path = None
     if parsed.password:
-        env["PGPASSWORD"] = parsed.password
+        host = parsed.hostname or "localhost"
+        port = str(parsed.port or 5432)
+        user = parsed.username or "postgres"
+        dbname_raw = (parsed.path or "").lstrip("/") or "questionwork"
+        fd, pgpass_path = tempfile.mkstemp(prefix="pgpass_", suffix=".conf")
+        with os.fdopen(fd, "w") as f:
+            f.write(f"{host}:{port}:{dbname_raw}:{user}:{parsed.password}\n")
+        os.chmod(pgpass_path, 0o600)
+        env["PGPASSFILE"] = pgpass_path
+
     dbname = (parsed.path or "").lstrip("/") or "questionwork"
-    return env, dbname
+    return env, dbname, pgpass_path
 
 
 def _rotate_old_backups(dest_dir: str, retention_days: int, dry_run: bool) -> int:
@@ -141,14 +157,17 @@ async def run(*, dry_run: bool = False, dest_dir: str = None) -> bool:
     dest_path = os.path.join(dest_dir, filename)
 
     pool = None
+    pgpass_path = None
     try:
         pool = await asyncpg.create_pool(settings.DATABASE_URL, min_size=1, max_size=1)
         await _record_job(pool, job_id, "running", started_at=started_at)
 
-        env, dbname = _parse_dsn(settings.DATABASE_URL)
+        env, dbname, pgpass_path = _parse_dsn(settings.DATABASE_URL)
 
         if dry_run:
             logger.info(f"[DRY-RUN] Would run pg_dump -Fc -f {dest_path} {dbname}")
+            if pgpass_path and os.path.exists(pgpass_path):
+                os.unlink(pgpass_path)
             await _record_job(
                 pool, job_id, "ok", path=dest_path + " (dry-run)",
                 started_at=started_at, finished_at=datetime.now(timezone.utc)
@@ -213,6 +232,9 @@ async def run(*, dry_run: bool = False, dest_dir: str = None) -> bool:
         return False
 
     finally:
+        # Clean up .pgpass temp file
+        if pgpass_path and os.path.exists(pgpass_path):
+            os.unlink(pgpass_path)
         if pool:
             await pool.close()
 

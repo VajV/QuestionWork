@@ -10,7 +10,7 @@
 
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 
 export interface XpToastData {
   xp_gained: number;
@@ -52,6 +52,16 @@ export function useXpToast(): UseXpToastResult {
     },
     [],
   );
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, []);
 
   return { toastState, showXpToast, hideXpToast };
 }

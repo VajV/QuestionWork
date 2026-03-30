@@ -1,8 +1,8 @@
 /**
- * Дашборд клиента — сводка активности
+ * Дашборд пользователя — сводка активности
  *
  * Маршрут: /profile/dashboard
- * - Только для role=client
+ * - Для авторизованных пользователей любой роли
  * - Сводка: активные квесты, бюджет, статистика
  */
 
@@ -10,14 +10,16 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { motion } from "@/lib/motion";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { getQuests, Quest } from "@/lib/api";
 import Header from "@/components/layout/Header";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
+import GuildStatusStrip from "@/components/ui/GuildStatusStrip";
 import QuestStatusBadge from "@/components/quests/QuestStatusBadge";
+import { formatMoney as _fmt } from "@/lib/format";
 import {
   LayoutDashboard,
   TrendingUp,
@@ -30,7 +32,7 @@ import {
 } from "lucide-react";
 
 function formatMoney(n: number): string {
-  return n.toLocaleString("ru-RU") + "₽";
+  return _fmt(n, { suffix: "₽" });
 }
 
 function StatBox({
@@ -63,21 +65,13 @@ export default function ClientDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!authLoading && (!isAuthenticated || user?.role !== "client")) {
-      router.push("/profile");
-    }
-  }, [authLoading, isAuthenticated, user, router]);
-
   const loadData = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     setError(null);
     try {
-      // Fetch all client quests (up to 200)
-      const res = await getQuests(1, 200);
-      const mine = res.quests.filter((q) => q.client_id === user.id);
-      setQuests(mine);
+      const res = await getQuests(1, 100, { userId: user.id });
+      setQuests(res.quests);
     } catch {
       setError("Не удалось загрузить данные");
     } finally {
@@ -86,18 +80,24 @@ export default function ClientDashboardPage() {
   }, [user]);
 
   useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.push("/profile");
+      return;
+    }
     loadData();
-  }, [loadData]);
+  }, [authLoading, isAuthenticated, user, router, loadData]);
 
   const stats = useMemo(() => {
     const open = quests.filter((q) => q.status === "open");
+    const assigned = quests.filter((q) => q.status === "assigned");
     const inProgress = quests.filter((q) => q.status === "in_progress");
     const confirmed = quests.filter((q) => q.status === "confirmed");
     const completed = quests.filter((q) => q.status === "completed");
+    const revisionRequested = quests.filter((q) => q.status === "revision_requested");
     const cancelled = quests.filter((q) => q.status === "cancelled");
 
     const totalSpent = confirmed.reduce((s, q) => s + q.budget, 0);
-    const activeCount = open.length + inProgress.length + completed.length;
+    const activeCount = open.length + assigned.length + inProgress.length + completed.length + revisionRequested.length;
 
     // Average completion time (confirmed quests with created_at)
     let avgDays = 0;
@@ -114,8 +114,10 @@ export default function ClientDashboardPage() {
       total: quests.length,
       active: activeCount,
       open,
+      assigned,
       inProgress,
       completed,
+      revisionRequested,
       confirmed,
       cancelled,
       totalSpent,
@@ -178,6 +180,24 @@ export default function ClientDashboardPage() {
             </div>
           </div>
 
+          <GuildStatusStrip
+            mode="profile"
+            eyebrow="Client command layer"
+            title="Ваш штаб публикаций и темпа по активным контрактам"
+            description="Этот экран больше не просто сводка. Он показывает текущее состояние вашей гильдейской доски: нагрузку, скорость закрытия и рыночное давление по активным квестам."
+            stats={[
+              { label: "Активный пул", value: stats.active, note: "открытые и в работе", tone: "cyan" },
+              { label: "Подтверждено", value: stats.confirmed.length, note: "успешно закрыто", tone: "emerald" },
+              { label: "Потрачено", value: formatMoney(stats.totalSpent), note: "подтвержденный бюджет", tone: "gold" },
+              { label: "Средний цикл", value: stats.avgDays > 0 ? `${stats.avgDays} дн.` : "—", note: "приблизительный tempo", tone: "purple" },
+            ]}
+            signals={[
+              { label: `${stats.open.length} открытых контрактов`, tone: stats.open.length > 0 ? "gold" : "slate" },
+              { label: `${stats.inProgress.length} в производстве`, tone: stats.inProgress.length > 0 ? "cyan" : "slate" },
+              { label: `${stats.revisionRequested.length} на доработке`, tone: stats.revisionRequested.length > 0 ? "amber" : "slate" },
+            ]}
+          />
+
           {/* Stat cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatBox
@@ -190,7 +210,7 @@ export default function ClientDashboardPage() {
               icon={<Clock size={24} />}
               label="Активные"
               value={stats.active}
-              sub={`${stats.open.length} открыт · ${stats.inProgress.length} в работе`}
+              sub={`${stats.open.length} открыт · ${stats.assigned.length} назначен · ${stats.inProgress.length} в работе · ${stats.revisionRequested.length} доработка`}
               color="text-blue-400"
             />
             <StatBox
@@ -224,7 +244,7 @@ export default function ClientDashboardPage() {
               </div>
             ) : (
               <ul className="divide-y divide-gray-800/60">
-                {[...stats.open, ...stats.inProgress, ...stats.completed]
+                {[...stats.open, ...stats.assigned, ...stats.inProgress, ...stats.completed, ...stats.revisionRequested]
                   .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
                   .slice(0, 10)
                   .map((q) => (

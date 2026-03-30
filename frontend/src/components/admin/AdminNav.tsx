@@ -13,6 +13,7 @@ import {
   X,
   Shield,
   ChevronLeft,
+  Gavel,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -20,6 +21,7 @@ const NAV_ITEMS = [
   { href: "/admin/users", label: "Пользователи", icon: Users },
   { href: "/admin/quests", label: "Квесты", icon: ScrollText },
   { href: "/admin/withdrawals", label: "Выводы средств", icon: Wallet },
+  { href: "/admin/disputes", label: "Споры", icon: Gavel },
   { href: "/admin/logs", label: "Аудит логи", icon: FileText },
 ] as const;
 
@@ -32,7 +34,7 @@ export default function AdminNav() {
       {/* Mobile toggle */}
       <button
         onClick={() => setMobileOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-gray-900/90 border border-gray-700 rounded-lg text-gray-300 hover:text-white backdrop-blur-md"
+        className="lg:hidden fixed top-4 left-4 z-50 rounded-lg border border-sky-500/20 bg-slate-950/90 p-2 text-slate-300 backdrop-blur-md hover:border-sky-400/35 hover:text-sky-100"
         aria-label="Открыть меню"
       >
         <Menu size={20} />
@@ -51,18 +53,18 @@ export default function AdminNav() {
         className={`
           fixed lg:sticky top-0 left-0 z-50 lg:z-auto
           h-screen w-64 shrink-0
-          bg-gray-950/95 backdrop-blur-md
-          border-r border-gray-800
+          bg-[linear-gradient(180deg,rgba(2,6,23,0.98),rgba(9,14,23,0.96))] backdrop-blur-md
+          border-r border-sky-500/10
           flex flex-col
           transition-transform duration-300
           ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
         `}
       >
         {/* Header */}
-        <div className="p-5 border-b border-gray-800/80">
+        <div className="border-b border-sky-500/10 p-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Shield className="text-purple-400" size={22} />
+              <Shield className="text-sky-300" size={22} />
               <span className="font-cinzel font-bold text-lg text-white tracking-wide">
                 Админ
               </span>
@@ -74,8 +76,8 @@ export default function AdminNav() {
               <X size={18} />
             </button>
           </div>
-          <p className="text-[10px] font-mono text-purple-500/70 mt-1 uppercase tracking-widest">
-            QuestionWork Panel
+          <p className="mt-1 text-[10px] font-mono uppercase tracking-widest text-sky-300/60">
+            Ops Command Center
           </p>
         </div>
 
@@ -95,8 +97,8 @@ export default function AdminNav() {
                   transition-all duration-200 group
                   ${
                     isActive
-                      ? "bg-purple-600/20 text-purple-300 border border-purple-500/30 shadow-[0_0_12px_rgba(168,85,247,0.15)]"
-                      : "text-gray-400 hover:text-white hover:bg-gray-800/60 border border-transparent"
+                      ? "border border-sky-400/30 bg-sky-500/12 text-sky-100 shadow-[0_0_12px_rgba(14,165,233,0.15)]"
+                      : "border border-transparent text-slate-400 hover:bg-slate-900/80 hover:text-slate-100"
                   }
                 `}
               >
@@ -104,8 +106,8 @@ export default function AdminNav() {
                   size={18}
                   className={
                     isActive
-                      ? "text-purple-400"
-                      : "text-gray-500 group-hover:text-gray-300"
+                      ? "text-sky-300"
+                      : "text-slate-500 group-hover:text-slate-300"
                   }
                 />
                 {item.label}
@@ -115,10 +117,10 @@ export default function AdminNav() {
         </nav>
 
         {/* Footer */}
-        <div className="p-4 border-t border-gray-800/80">
+        <div className="border-t border-sky-500/10 p-4">
           <Link
             href="/"
-            className="flex items-center gap-2 text-xs text-gray-500 hover:text-amber-400 transition-colors font-mono uppercase tracking-wider"
+            className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-slate-500 transition-colors hover:text-sky-200"
           >
             <ChevronLeft size={14} />
             На главную

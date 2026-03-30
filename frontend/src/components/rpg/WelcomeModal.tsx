@@ -1,6 +1,7 @@
 "use client";
 
-import { motion, AnimatePresence } from "framer-motion";
+import { useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "@/lib/motion";
 import { Sparkles, Swords, ChevronRight, X } from "lucide-react";
 
 interface WelcomeModalProps {
@@ -18,9 +19,27 @@ export default function WelcomeModal({
   onSelectClass,
   onClose,
 }: WelcomeModalProps) {
-  if (!isOpen) return null;
-
   const canPickClass = userLevel >= 5;
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
+  if (!isOpen) return null;
 
   return (
     <AnimatePresence>
@@ -33,6 +52,9 @@ export default function WelcomeModal({
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
 
         <motion.div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="welcome-modal-title"
           className="relative w-full max-w-lg bg-gray-900 border border-purple-700/50 rounded-2xl shadow-2xl overflow-hidden"
           initial={{ scale: 0.85, y: 30 }}
           animate={{ scale: 1, y: 0 }}
@@ -44,7 +66,10 @@ export default function WelcomeModal({
           <div className="absolute -bottom-16 -left-16 w-48 h-48 rounded-full bg-amber-500 blur-[80px] opacity-15 pointer-events-none" />
 
           <button
+            ref={closeButtonRef}
+            type="button"
             onClick={onClose}
+            aria-label="Закрыть приветственное окно"
             className="absolute top-4 right-4 p-1 text-gray-500 hover:text-white transition-colors z-20"
           >
             <X size={20} />
@@ -62,7 +87,7 @@ export default function WelcomeModal({
 
             {/* Title */}
             <div>
-              <h2 className="text-2xl font-cinzel font-bold text-white mb-2">
+              <h2 id="welcome-modal-title" className="text-2xl font-cinzel font-bold text-white mb-2">
                 Добро пожаловать, <span className="text-amber-400">{username}</span>!
               </h2>
               <p className="text-gray-400 text-sm leading-relaxed">
@@ -97,6 +122,7 @@ export default function WelcomeModal({
             <div className="flex flex-col gap-2 pt-2">
               {canPickClass ? (
                 <button
+                  type="button"
                   onClick={onSelectClass}
                   className="w-full py-3 rounded-lg bg-gradient-to-r from-amber-600 to-amber-800 text-white font-cinzel font-bold shadow-[0_0_20px_rgba(217,119,6,0.4)] hover:shadow-[0_0_30px_rgba(217,119,6,0.6)] transition-shadow flex items-center justify-center gap-2"
                 >
@@ -104,6 +130,7 @@ export default function WelcomeModal({
                 </button>
               ) : (
                 <button
+                  type="button"
                   onClick={onClose}
                   className="w-full py-3 rounded-lg bg-gradient-to-r from-purple-600 to-purple-800 text-white font-cinzel font-bold shadow-[0_0_20px_rgba(168,85,247,0.3)] hover:shadow-[0_0_30px_rgba(168,85,247,0.5)] transition-shadow flex items-center justify-center gap-2"
                 >

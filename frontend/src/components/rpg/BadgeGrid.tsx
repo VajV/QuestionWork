@@ -67,6 +67,8 @@ function BadgeCard({
 
   return (
     <div
+      role="group"
+      aria-label={b.badge_name}
       title={b.badge_description}
       className="group flex flex-col items-center gap-3 rounded border border-purple-900/30 bg-gray-900/80 p-5 shadow-lg relative overflow-hidden transition-all duration-300 hover:scale-105 hover:border-purple-500/60 hover:bg-purple-950/20 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] cursor-pointer"
     >

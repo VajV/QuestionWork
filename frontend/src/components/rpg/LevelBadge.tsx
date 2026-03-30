@@ -40,7 +40,7 @@ export default function LevelBadge({ level, grade, size = 'md', showGradeText = 
       </div>
       {showGradeText && (
         <span 
-          className="text-sm font-cinzel tracking-widest uppercase"
+          className={`text-sm font-cinzel tracking-widest uppercase grade-glow-${gradeClass}`}
           style={{ color: `var(--rarity-${gradeClass}, var(--rarity-novice))` }}
         >
           {grade}

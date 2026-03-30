@@ -65,6 +65,31 @@ function Invoke-ApiGet {
     }
 }
 
+function Get-MissingRuntimeApiPaths {
+    param([string]$OpenApiUrl)
+
+    $expectedPaths = @(
+        "/api/v1/analytics/events",
+        "/api/v1/analytics/funnel-kpis",
+        "/api/v1/notifications/preferences"
+    )
+
+    try {
+        $doc = Invoke-RestMethod -Uri $OpenApiUrl -TimeoutSec 4 -ErrorAction Stop
+    } catch {
+        return $expectedPaths
+    }
+
+    $missing = @()
+    foreach ($path in $expectedPaths) {
+        if (-not ($doc.paths.PSObject.Properties.Name -contains $path)) {
+            $missing += $path
+        }
+    }
+
+    return $missing
+}
+
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
@@ -140,26 +165,35 @@ Write-Check "typescript installed"     (Test-Path -LiteralPath (Join-Path $nodeM
 # 4. Backend API
 # ---------------------------------------------------------------------------
 
-Write-Section "4. Backend API (http://localhost:8000)"
+Write-Section "4. Backend API (http://localhost:8001)"
 
-$backendPort = Test-Port 8000
-Write-Check "Port 8000 is listening" $backendPort "uvicorn"
+$backendPort = Test-Port 8001
+Write-Check "Port 8001 is listening" $backendPort "uvicorn"
 
 if ($backendPort) {
-    $health = Invoke-ApiGet "http://localhost:8000/health"
+    $health = Invoke-ApiGet "http://localhost:8001/health"
     Write-Check "GET /health -- 200"      ($health -and $health.StatusCode -eq 200)
 
-    $swagger = Invoke-ApiGet "http://localhost:8000/docs"
+    $swagger = Invoke-ApiGet "http://localhost:8001/docs"
     Write-Check "GET /docs -- 200"        ($swagger -and $swagger.StatusCode -eq 200)
 
-    $openapi = Invoke-ApiGet "http://localhost:8000/openapi.json"
+    $openapi = Invoke-ApiGet "http://localhost:8001/openapi.json"
     Write-Check "GET /openapi.json"       ($openapi -and $openapi.StatusCode -eq 200)
+
+    $missingRuntimePaths = Get-MissingRuntimeApiPaths "http://localhost:8001/openapi.json"
+    $runtimePathCheckOk = ($missingRuntimePaths.Count -eq 0)
+    $runtimePathDetail = if ($runtimePathCheckOk) {
+        "analytics + notification preference endpoints present"
+    } else {
+        "missing: " + ($missingRuntimePaths -join ", ")
+    }
+    Write-Check "Runtime route map contains expected endpoints" $runtimePathCheckOk $runtimePathDetail -IsWarn:(-not $runtimePathCheckOk)
 
     # Auth register endpoint (400 = already exists = endpoint is alive)
     $regBody = '{"username":"__sc__","email":"sc@sc.sc","password":"StatusCheck1!","role":"freelancer"}'
     $regOk   = $false
     try {
-        $regResp = Invoke-WebRequest -Uri "http://localhost:8000/api/v1/auth/register" `
+        $regResp = Invoke-WebRequest -Uri "http://localhost:8001/api/v1/auth/register" `
                        -Method POST -Body $regBody -ContentType "application/json" `
                        -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
         $regOk = ($regResp.StatusCode -eq 201)
@@ -174,7 +208,7 @@ if ($backendPort) {
     $loginOk    = $false
     $demoToken  = $null
     try {
-        $loginResp = Invoke-WebRequest -Uri "http://localhost:8000/api/v1/auth/login" `
+        $loginResp = Invoke-WebRequest -Uri "http://localhost:8001/api/v1/auth/login" `
                          -Method POST -Body $loginBody -ContentType "application/json" `
                          -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
         $loginData = $loginResp.Content | ConvertFrom-Json
@@ -187,7 +221,7 @@ if ($backendPort) {
     Write-Check "POST /api/v1/auth/login (novice_dev)" $loginOk
 
     # Quests list
-    $questsResp = Invoke-ApiGet "http://localhost:8000/api/v1/quests/?page=1"
+    $questsResp = Invoke-ApiGet "http://localhost:8001/api/v1/quests/?page=1"
     $questsOk   = ($null -ne $questsResp) -and ($questsResp.StatusCode -eq 200)
     $questCount = 0
     if ($questsOk) {
@@ -203,7 +237,7 @@ if ($backendPort) {
     if ($demoToken) {
         try {
             $authHeaders2 = @{ Authorization = "Bearer $demoToken" }
-            $usersAuth = Invoke-WebRequest -Uri "http://localhost:8000/api/v1/users/" `
+            $usersAuth = Invoke-WebRequest -Uri "http://localhost:8001/api/v1/users/" `
                              -Headers $authHeaders2 -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
             $usersOk = ($usersAuth.StatusCode -eq 200)
         } catch {
@@ -214,7 +248,7 @@ if ($backendPort) {
         # No demo token -- just confirm endpoint responds (401 is correct behaviour)
         $usersNoAuth = $null
         try {
-            Invoke-WebRequest -Uri "http://localhost:8000/api/v1/users/" `
+            Invoke-WebRequest -Uri "http://localhost:8001/api/v1/users/" `
                 -UseBasicParsing -TimeoutSec 4 -ErrorAction Stop | Out-Null
         } catch {
             $usersNoAuth = $_.Exception.Response.StatusCode.Value__
@@ -228,7 +262,7 @@ if ($backendPort) {
         $protectedOk = $false
         try {
             $authHeaders = @{ Authorization = "Bearer $demoToken" }
-            $protResp    = Invoke-WebRequest -Uri "http://localhost:8000/api/v1/quests/" `
+            $protResp    = Invoke-WebRequest -Uri "http://localhost:8001/api/v1/quests/" `
                                -Headers $authHeaders -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
             $protectedOk = ($protResp.StatusCode -eq 200)
         } catch {
@@ -349,7 +383,7 @@ if (Test-Path -LiteralPath $backendEnvPath) {
 $frontendEnvPath = Join-Path $FRONTEND_DIR ".env.local"
 if (Test-Path -LiteralPath $frontendEnvPath) {
     $feTxt = Get-Content $frontendEnvPath -Raw
-    Write-Check "NEXT_PUBLIC_API_URL set" ($feTxt -match "NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1")
+    Write-Check "NEXT_PUBLIC_API_URL set" ($feTxt -match "NEXT_PUBLIC_API_URL=http://localhost:8001/api/v1")
 } else {
     Write-Check "frontend\.env.local readable" $false "file not found"
 }
@@ -414,9 +448,9 @@ if ($failedChecks -gt 0) {
 Write-Host ""
 Write-Host "  Quick links:" -ForegroundColor Gray
 Write-Host "    Frontend  : http://localhost:3000"       -ForegroundColor DarkGray
-Write-Host "    Backend   : http://localhost:8000"       -ForegroundColor DarkGray
-Write-Host "    Swagger   : http://localhost:8000/docs"  -ForegroundColor DarkGray
-Write-Host "    Health    : http://localhost:8000/health" -ForegroundColor DarkGray
+Write-Host "    Backend   : http://localhost:8001"       -ForegroundColor DarkGray
+Write-Host "    Swagger   : http://localhost:8001/docs"  -ForegroundColor DarkGray
+Write-Host "    Health    : http://localhost:8001/health" -ForegroundColor DarkGray
 Write-Host ""
 
 # Deterministic exit code for CI

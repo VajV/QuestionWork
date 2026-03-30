@@ -2,7 +2,7 @@
  * AuthContext - Контекст аутентификации
  *
  * Управляет состоянием пользователя, токеном и функциями входа/выхода
- * Сохраняет токен в localStorage для сохранения сессии между перезагрузками
+ * Сохраняет только безопасный профиль пользователя в localStorage между перезагрузками
  */
 
 "use client";
@@ -13,6 +13,7 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useMemo,
   ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -20,9 +21,20 @@ import {
   login as apiLogin,
   register as apiRegister,
   logout as apiLogout,
-  getUserProfile,
+  getSelfProfile,
+  getApiErrorMessage,
+  getApiErrorStatus,
+  refreshSession,
   setAccessToken,
 } from "@/lib/api";
+import {
+  clearAdminTotpError as clearStoredAdminTotpError,
+  clearAdminTotpToken as clearStoredAdminTotpToken,
+  getAdminTotpError,
+  getAdminTotpToken,
+  setAdminTotpToken as setStoredAdminTotpToken,
+  subscribeAdminTotpState,
+} from "@/lib/adminTotp";
 import { registerLogoutHandler } from "@/lib/authEvents";
 import type { UserProfile, LoginData, RegisterData } from "@/lib/api";
 
@@ -36,6 +48,8 @@ interface AuthContextType {
   token: string | null;
   isAuthenticated: boolean;
   loading: boolean;
+  adminTotpToken: string | null;
+  adminTotpError: string | null;
 
   // Действия
   login: (
@@ -44,6 +58,9 @@ interface AuthContextType {
   register: (
     data: RegisterData,
   ) => Promise<{ success: boolean; error?: string }>;
+  setAdminTotpToken: (token: string) => void;
+  clearAdminTotpToken: (error?: string) => void;
+  clearAdminTotpError: () => void;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -54,6 +71,35 @@ interface AuthContextType {
 
 // const STORAGE_KEY_TOKEN = "questionwork_token";
 const STORAGE_KEY_USER = "questionwork_user";
+
+function clearStoredUser() {
+  localStorage.removeItem(STORAGE_KEY_USER);
+}
+
+function readStoredUserHint(): Pick<UserProfile, "id" | "username"> | null {
+  const raw = localStorage.getItem(STORAGE_KEY_USER);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<UserProfile>;
+    if (!parsed?.id || !parsed?.username) {
+      clearStoredUser();
+      return null;
+    }
+    return { id: parsed.id, username: parsed.username };
+  } catch {
+    clearStoredUser();
+    return null;
+  }
+}
+
+/** Persist minimal user hint to localStorage for session resumption. */
+function persistUser(user: UserProfile) {
+  const hint = { id: user.id, username: user.username };
+  localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(hint));
+}
 
 // ============================================
 // Создание контекста
@@ -74,6 +120,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [adminTotpToken, setAdminTotpTokenState] = useState<string | null>(
+    getAdminTotpToken(),
+  );
+  const [adminTotpError, setAdminTotpErrorState] = useState<string | null>(
+    getAdminTotpError(),
+  );
 
   const router = useRouter();
 
@@ -82,37 +134,72 @@ export function AuthProvider({ children }: AuthProviderProps) {
    * Восстанавливает токен и пользователя из localStorage
    */
   useEffect(() => {
+    return subscribeAdminTotpState((state) => {
+      setAdminTotpTokenState(state.token);
+      setAdminTotpErrorState(state.error);
+    });
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+    let hardStopId: ReturnType<typeof setTimeout> | null = null;
+
     const initAuth = async () => {
       try {
-        // Try to refresh access token using httpOnly refresh cookie.
-        // If successful, server returns TokenResponse (access_token + user).
-        const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
-        const resp = await fetch(`${base}/auth/refresh`, {
-          method: "POST",
-          credentials: "include",
-        });
+        hardStopId = setTimeout(() => {
+          if (isActive) {
+            setLoading(false);
+          }
+        }, 7000);
 
-        if (resp.ok) {
-          const data = await resp.json();
-          setAccessToken(data.access_token);
+        const storedUser = readStoredUserHint();
+        if (!storedUser) {
+          return;
+        }
+
+        const data = await refreshSession();
+        if (!isActive) {
+          return;
+        }
+
+        if (data?.access_token && data.user) {
           setToken(data.access_token);
           setUser(data.user);
-          // persist user profile for UI across reloads
-          localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(data.user));
+          if (data.user.role !== "admin") {
+            clearStoredAdminTotpToken();
+          }
+          // persist user profile for UI across reloads (strip email)
+          persistUser(data.user);
         } else {
           // Refresh failed — clear stale user data so isAuthenticated stays false
           // and the UI doesn't show a logged-in state without a valid token.
-          localStorage.removeItem(STORAGE_KEY_USER);
+          if (isActive) {
+            clearStoredUser();
+          }
         }
-      } catch (error) {
-        console.error("Ошибка инициализации аутентификации:", error);
-        localStorage.removeItem(STORAGE_KEY_USER);
+      } catch (_error) {
+        if (isActive) {
+          clearStoredUser();
+        }
       } finally {
-        setLoading(false);
+        if (hardStopId) {
+          clearTimeout(hardStopId);
+        }
+        if (isActive) {
+          setLoading(false);
+        }
       }
     };
 
     initAuth();
+
+    return () => {
+      isActive = false;
+
+      if (hardStopId) {
+        clearTimeout(hardStopId);
+      }
+    };
   }, []);
 
   /**
@@ -126,31 +213,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
       credentials: LoginData,
     ): Promise<{ success: boolean; error?: string }> => {
       try {
+        clearStoredAdminTotpToken();
         const response = await apiLogin(credentials);
 
         // Save access token in memory and user profile in storage
         setAccessToken(response.access_token);
         setToken(response.access_token);
         setUser(response.user);
-        localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(response.user));
+        persistUser(response.user);
 
         return { success: true };
       } catch (error) {
-        console.error("Ошибка входа:", error);
-
-        let errorMessage = "Не удалось войти";
-        if (error instanceof Error) {
-          errorMessage = error.message;
-        } else if (
-          typeof error === "object" &&
-          error !== null &&
-          "detail" in error
-        ) {
-          errorMessage =
-            (error as Record<string, string>).detail || errorMessage;
+        const message = getApiErrorMessage(error, "Не удалось войти");
+        const status = getApiErrorStatus(error);
+        if (process.env.NODE_ENV !== "production" && (status === undefined || status === 0 || status >= 500)) {
+          console.warn("Ошибка входа:", { status, message });
         }
-
-        return { success: false, error: errorMessage };
+        return { success: false, error: message };
       }
     },
     [],
@@ -167,31 +246,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
       data: RegisterData,
     ): Promise<{ success: boolean; error?: string }> => {
       try {
+        clearStoredAdminTotpToken();
         const response = await apiRegister(data);
 
         // Save access token in memory and user profile in storage (auto-login)
         setAccessToken(response.access_token);
         setToken(response.access_token);
         setUser(response.user);
-        localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(response.user));
+        persistUser(response.user);
 
         return { success: true };
       } catch (error) {
-        console.error("Ошибка регистрации:", error);
-
-        let errorMessage = "Не удалось зарегистрироваться";
-        if (error instanceof Error) {
-          errorMessage = error.message;
-        } else if (
-          typeof error === "object" &&
-          error !== null &&
-          "detail" in error
-        ) {
-          errorMessage =
-            (error as Record<string, string>).detail || errorMessage;
+        const message = getApiErrorMessage(error, "Не удалось зарегистрироваться");
+        const status = getApiErrorStatus(error);
+        if (process.env.NODE_ENV !== "production" && (status === undefined || status === 0 || status >= 500)) {
+          console.warn("Ошибка регистрации:", { status, message });
         }
-
-        return { success: false, error: errorMessage };
+        return {
+          success: false,
+          error: message,
+        };
       }
     },
     [],
@@ -212,8 +286,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setToken(null);
       setUser(null);
       setAccessToken(null);
-      localStorage.removeItem(STORAGE_KEY_USER);
+      clearStoredAdminTotpToken();
+      clearStoredUser();
     }
+  }, []);
+
+  const setAdminTotpToken = useCallback((nextToken: string) => {
+    setStoredAdminTotpToken(nextToken);
+  }, []);
+
+  const clearAdminTotpToken = useCallback((error?: string) => {
+    clearStoredAdminTotpToken(error ?? null);
+  }, []);
+
+  const clearAdminTotpError = useCallback(() => {
+    clearStoredAdminTotpError();
   }, []);
 
   /**
@@ -224,11 +311,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (!user?.id) return;
 
     try {
-      const freshUser = await getUserProfile(user.id);
-      setUser(freshUser);
-      localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(freshUser));
+      // P1-14 FIX: use authenticated /users/me so is_banned + email stay current
+      const freshUser = await getSelfProfile();
+      setUser((previousUser) => {
+        if (!previousUser) {
+          return previousUser;
+        }
+        const mergedUser: UserProfile = {
+          ...previousUser,
+          ...freshUser,
+        };
+        persistUser(mergedUser);
+        return mergedUser;
+      });
     } catch (error) {
-      console.error("Ошибка обновления пользователя:", error);
+      const message = getApiErrorMessage(error, "Не удалось обновить пользователя");
+      const status = getApiErrorStatus(error);
+      if (process.env.NODE_ENV !== "production" && (status === undefined || status === 0 || status >= 500)) {
+        console.warn("Ошибка обновления пользователя:", { status, message });
+      }
     }
   }, [user?.id]);
 
@@ -245,16 +346,38 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [logout, router]);
 
   // Значение контекста
-  const contextValue: AuthContextType = {
-    user,
-    token,
-    isAuthenticated,
-    loading,
-    login,
-    register,
-    logout,
-    refreshUser,
-  };
+  const contextValue = useMemo<AuthContextType>(
+    () => ({
+      user,
+      token,
+      isAuthenticated,
+      loading,
+      adminTotpToken,
+      adminTotpError,
+      login,
+      register,
+      setAdminTotpToken,
+      clearAdminTotpToken,
+      clearAdminTotpError,
+      logout,
+      refreshUser,
+    }),
+    [
+      user,
+      token,
+      isAuthenticated,
+      loading,
+      adminTotpToken,
+      adminTotpError,
+      login,
+      register,
+      setAdminTotpToken,
+      clearAdminTotpToken,
+      clearAdminTotpError,
+      logout,
+      refreshUser,
+    ],
+  );
 
   return (
     <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>
@@ -288,3 +411,9 @@ export function useAuth() {
 // ============================================
 
 export default AuthContext;
+
+
+
+
+
+

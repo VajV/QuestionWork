@@ -1,34 +1,41 @@
 /**
  * Quest Templates management page
  *
- * Clients can create, view, edit, delete and use templates
+ * Clients and admins can create, view, edit, delete and use templates
  * to quickly create quests from saved blueprints.
  */
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import {
   getTemplates,
   createTemplate,
   deleteTemplate,
+  updateTemplate,
   createQuestFromTemplate,
   QuestTemplate,
-  UserGrade,
+  UpdateTemplatePayload,
 } from "@/lib/api";
 import Header from "@/components/layout/Header";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
+import GuildStatusStrip from "@/components/ui/GuildStatusStrip";
+import SeasonFactionRail from "@/components/ui/SeasonFactionRail";
+import WorldPanel from "@/components/ui/WorldPanel";
+import { trackAnalyticsEvent } from "@/lib/analytics";
+import { safeParseMoney } from "@/lib/money";
 import {
   Plus,
   Trash2,
   FileText,
   Rocket,
   Loader2,
-  ChevronDown,
   ChevronUp,
+  Pencil,
+  X,
 } from "lucide-react";
 
 const GRADE_LABELS: Record<string, string> = {
@@ -45,6 +52,15 @@ const GRADE_COLORS: Record<string, string> = {
   senior: "text-purple-300 border-purple-700 bg-purple-950/40",
 };
 
+const INTENT_GROUPS = [
+  { label: "MVP / Прототип", icon: "🚀", hint: "Быстрый запуск продукта", keywords: ["mvp", "prototype", "прототип", "лендинг", "landing"] },
+  { label: "Срочный фикс", icon: "🔥", hint: "Исправление бага или сбоя", keywords: ["fix", "bug", "фикс", "баг", "срочн", "urgent"] },
+  { label: "Дашборд / Аналитика", icon: "📊", hint: "Панели и отчёты", keywords: ["dashboard", "дашборд", "аналитик", "отчёт", "report"] },
+  { label: "Бэкенд / API", icon: "⚙️", hint: "Серверная разработка", keywords: ["backend", "api", "бэкенд", "сервер", "fastapi", "django"] },
+  { label: "Фронтенд / UI", icon: "🎨", hint: "Интерфейс и компоненты", keywords: ["frontend", "ui", "ux", "фронтенд", "react", "next", "vue"] },
+  { label: "Рефакторинг", icon: "🔧", hint: "Улучшение кодовой базы", keywords: ["refactor", "рефакторинг", "переписать", "migration", "миграц"] },
+];
+
 export default function TemplatesPage() {
   const router = useRouter();
   const { isAuthenticated, user } = useAuth();
@@ -55,9 +71,13 @@ export default function TemplatesPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  // Editing state
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   // New template form
   const [showForm, setShowForm] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
+  const hasTrackedView = useRef(false);
   const [form, setForm] = useState({
     name: "",
     title: "",
@@ -87,9 +107,20 @@ export default function TemplatesPage() {
     if (isAuthenticated) load();
   }, [isAuthenticated, load]);
 
-  // Guard: only clients
   useEffect(() => {
-    if (user && user.role !== "client") {
+    if (loading || hasTrackedView.current) {
+      return;
+    }
+    hasTrackedView.current = true;
+    trackAnalyticsEvent("template_viewed", {
+      template_count: templates.length,
+      recommended_group_count: INTENT_GROUPS.length,
+    });
+  }, [loading, templates.length]);
+
+  // Guard: only clients/admins
+  useEffect(() => {
+    if (user && user.role !== "client" && user.role !== "admin") {
       router.push("/quests");
     }
   }, [user, router]);
@@ -110,7 +141,7 @@ export default function TemplatesPage() {
         description: form.description.trim(),
         required_grade: form.required_grade,
         skills,
-        budget: parseFloat(form.budget) || 0,
+        budget: safeParseMoney(form.budget) ?? 0,
         currency: form.currency,
         is_urgent: form.is_urgent,
         required_portfolio: form.required_portfolio,
@@ -137,6 +168,80 @@ export default function TemplatesPage() {
     }
   };
 
+  const handleEdit = useCallback((template: QuestTemplate) => {
+    setForm({
+      name: template.name,
+      title: template.title,
+      description: template.description || "",
+      required_grade: template.required_grade,
+      skills: template.skills.join(", "),
+      budget: template.budget > 0 ? String(template.budget) : "",
+      currency: template.currency || "RUB",
+      is_urgent: template.is_urgent,
+      required_portfolio: template.required_portfolio,
+    });
+    setEditingId(template.id);
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
+  const handleUpdate = async () => {
+    if (!editingId) return;
+    setFormLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const payload: UpdateTemplatePayload = {
+        name: form.name.trim() || undefined,
+        title: form.title.trim() || undefined,
+        description: form.description.trim() || undefined,
+        required_grade: form.required_grade || undefined,
+        skills: form.skills ? form.skills.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
+        budget: form.budget ? (safeParseMoney(form.budget) ?? undefined) : undefined,
+        currency: form.currency || undefined,
+        is_urgent: form.is_urgent,
+        required_portfolio: form.required_portfolio,
+      };
+      await updateTemplate(editingId, payload);
+      setSuccess("Шаблон обновлён!");
+      setEditingId(null);
+      setShowForm(false);
+      setForm({
+        name: "",
+        title: "",
+        description: "",
+        required_grade: "novice",
+        skills: "",
+        budget: "",
+        currency: "RUB",
+        is_urgent: false,
+        required_portfolio: false,
+      });
+      await load();
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError((err as { detail?: string }).detail || "Не удалось обновить шаблон");
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingId(null);
+    setShowForm(false);
+    setForm({
+      name: "",
+      title: "",
+      description: "",
+      required_grade: "novice",
+      skills: "",
+      budget: "",
+      currency: "RUB",
+      is_urgent: false,
+      required_portfolio: false,
+    });
+  }, []);
+
   const handleDelete = async (id: string) => {
     if (!confirm("Удалить шаблон?")) return;
     try {
@@ -151,30 +256,83 @@ export default function TemplatesPage() {
   };
 
   const handleUseTemplate = async (id: string) => {
+    const template = templates.find((item) => item.id === id);
+    trackAnalyticsEvent("template_selected", {
+      template_id: id,
+      template_name: template?.name ?? null,
+      flow: "instant-create",
+    });
     try {
       const quest = await createQuestFromTemplate(id);
+      trackAnalyticsEvent("quest_created_from_template", {
+        template_id: id,
+        template_name: template?.name ?? null,
+        quest_id: quest.id,
+        flow: "instant-create",
+      });
       router.push(`/quests/${quest.id}`);
     } catch {
       setError("Не удалось создать квест из шаблона");
     }
   };
 
-  if (!isAuthenticated || (user && user.role !== "client")) {
+  /** Navigate to guided wizard with template pre-filled */
+  const handleUseInWizard = (tpl: QuestTemplate) => {
+    trackAnalyticsEvent("template_selected", {
+      template_id: tpl.id,
+      template_name: tpl.name,
+      flow: "guided-wizard",
+    });
+    const params = new URLSearchParams();
+    if (tpl.title) params.set("title", tpl.title);
+    if (tpl.description) params.set("description", tpl.description);
+    if (tpl.required_grade) params.set("grade", tpl.required_grade);
+    if (tpl.skills?.length) params.set("skills", tpl.skills.join(","));
+    if (tpl.budget > 0) params.set("budget", String(tpl.budget));
+    if (tpl.currency) params.set("currency", tpl.currency);
+    if (tpl.is_urgent) params.set("urgent", "true");
+    if (tpl.required_portfolio) params.set("portfolio", "true");
+    params.set("template_id", tpl.id);
+    params.set("template_name", tpl.name);
+    router.push(`/quests/create?${params.toString()}`);
+  };
+
+  if (!isAuthenticated || (user && user.role !== "client" && user.role !== "admin")) {
     return (
       <main className="min-h-screen bg-gray-950 text-gray-200 font-inter">
         <Header />
         <div className="container mx-auto px-4 py-16 text-center">
-          <p className="text-gray-400">Шаблоны доступны только заказчикам</p>
+          <p className="text-gray-400">Шаблоны доступны только заказчикам и администраторам</p>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-gray-950 text-gray-200 font-inter">
+    <main className="guild-world-shell min-h-screen bg-gray-950 text-gray-200 font-inter">
       <Header />
 
       <div className="container mx-auto px-4 py-8 max-w-4xl">
+        <GuildStatusStrip
+          mode="profile"
+          eyebrow="Blueprint archive"
+          title="Шаблоны стали частью стратегического слоя публикации контрактов"
+          description="Эта страница теперь визуально рифмуется с create-flow: сверху состояние архива, ниже reusable blueprints и их боевое применение."
+          stats={[
+            { label: "Templates", value: total, note: "в архиве", tone: "purple" },
+            { label: "Visible", value: templates.length, note: "загружено сейчас", tone: "cyan" },
+            { label: "Form", value: showForm ? 'OPEN' : 'HIDDEN', note: "панель создания", tone: showForm ? 'amber' : 'slate' },
+            { label: "Urgent tags", value: templates.filter((template) => template.is_urgent).length, note: "срочные заготовки", tone: "emerald" },
+          ]}
+          signals={[
+            { label: formLoading ? 'archive writing' : 'archive stable', tone: formLoading ? 'cyan' : 'slate' },
+            { label: success ? 'recent template action' : 'ready for blueprinting', tone: success ? 'emerald' : 'purple' },
+          ]}
+          className="mb-6"
+        />
+
+        <SeasonFactionRail mode="templates" questCount={templates.length} className="mb-6" />
+
         {/* Title */}
         <div className="flex items-center justify-between mb-8">
           <div>
@@ -202,6 +360,15 @@ export default function TemplatesPage() {
           </Button>
         </div>
 
+        <WorldPanel
+          eyebrow="Archive discipline"
+          title="Единый panel primitive держит форму архива и блока создания"
+          description="Секции шаблонов теперь выглядят частью одной системы с quest board и contract foundry."
+          tone="purple"
+          className="mb-6"
+          compact
+        />
+
         {/* Alerts */}
         {error && (
           <div className="mb-4 p-3 bg-red-950/40 border border-red-800/50 rounded text-red-400 text-sm font-mono">
@@ -218,9 +385,19 @@ export default function TemplatesPage() {
         {showForm && (
           <Card className="p-0 border-none bg-transparent mb-8">
             <div className="rpg-card p-6 space-y-4">
-              <h2 className="text-lg font-cinzel font-bold text-amber-500">
-                Новый шаблон
-              </h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-cinzel font-bold text-amber-500">
+                  {editingId ? "✏️ Редактирование шаблона" : "Новый шаблон"}
+                </h2>
+                {editingId && (
+                  <button
+                    onClick={handleCancelEdit}
+                    className="flex items-center gap-1 text-sm text-gray-400 hover:text-white transition-colors"
+                  >
+                    <X size={16} /> Отмена
+                  </button>
+                )}
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -288,6 +465,8 @@ export default function TemplatesPage() {
                   </label>
                   <input
                     type="number"
+                    min={0}
+                    max={1000000}
                     value={form.budget}
                     onChange={(e) =>
                       setForm({ ...form, budget: e.target.value })
@@ -354,7 +533,7 @@ export default function TemplatesPage() {
               </div>
 
               <Button
-                onClick={handleCreate}
+                onClick={editingId ? handleUpdate : handleCreate}
                 variant="primary"
                 className="w-full font-cinzel tracking-wider"
                 disabled={formLoading || !form.name.trim() || !form.title.trim()}
@@ -362,8 +541,10 @@ export default function TemplatesPage() {
                 {formLoading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin mr-2 inline" />
-                    Создание...
+                    {editingId ? "Сохранение..." : "Создание..."}
                   </>
+                ) : editingId ? (
+                  "💾 Сохранить изменения"
                 ) : (
                   "✨ Создать шаблон"
                 )}
@@ -384,9 +565,22 @@ export default function TemplatesPage() {
               <h2 className="text-xl font-cinzel font-bold text-gray-400 mb-2">
                 Нет шаблонов
               </h2>
-              <p className="text-gray-500 text-sm">
+              <p className="text-gray-500 text-sm mb-4">
                 Создайте первый шаблон, чтобы быстро публиковать квесты
               </p>
+              {/* Recommended intent groups */}
+              <div className="mt-6 text-left max-w-lg mx-auto">
+                <p className="text-xs font-mono uppercase tracking-widest text-gray-500 mb-3">Рекомендуемые категории шаблонов:</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {INTENT_GROUPS.map((g) => (
+                    <div key={g.label} className="p-3 bg-gray-900/50 border border-gray-800 rounded-lg">
+                      <span className="text-base mr-2">{g.icon}</span>
+                      <span className="text-sm text-gray-300 font-cinzel">{g.label}</span>
+                      <p className="text-xs text-gray-500 mt-1">{g.hint}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </Card>
         ) : (
@@ -434,11 +628,25 @@ export default function TemplatesPage() {
 
                     <div className="flex gap-2 shrink-0">
                       <button
+                        onClick={() => handleEdit(tpl)}
+                        className="p-2 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 transition-colors"
+                        title="Редактировать"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleUseInWizard(tpl)}
+                        className="flex items-center gap-1.5 px-4 py-2 bg-amber-800/30 hover:bg-amber-700/50 border border-amber-700/40 rounded text-sm text-amber-300 transition-colors font-cinzel"
+                        title="Открыть в мастере создания"
+                      >
+                        <FileText className="w-4 h-4" /> В мастер
+                      </button>
+                      <button
                         onClick={() => handleUseTemplate(tpl.id)}
                         className="flex items-center gap-1.5 px-4 py-2 bg-purple-800/50 hover:bg-purple-700/70 border border-purple-700/40 rounded text-sm text-purple-200 transition-colors font-cinzel"
-                        title="Создать квест из шаблона"
+                        title="Быстро создать квест из шаблона"
                       >
-                        <Rocket className="w-4 h-4" /> Использовать
+                        <Rocket className="w-4 h-4" /> Быстрый квест
                       </button>
                       <button
                         onClick={() => handleDelete(tpl.id)}

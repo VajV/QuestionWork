@@ -13,8 +13,9 @@ from typing import Optional
 
 import asyncpg
 
+from app.core.cache import redis_cache, invalidate_cache_scope
 from app.core.rewards import check_level_up, calculate_xp_to_next
-from app.services import badge_service
+from app.services import badge_service, trust_score_service
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,9 @@ async def create_review(
     Raises:
         ValueError on validation failure.
     """
+    if not conn.is_in_transaction():
+        raise RuntimeError("create_review must be called inside a DB transaction")
+
     if reviewer_id == reviewee_id:
         raise ValueError("Нельзя оставить отзыв самому себе")
 
@@ -106,19 +110,22 @@ async def create_review(
 
     # 6. Refresh reviewee's cached rating on users table
     await _refresh_user_rating(conn, reviewee_id)
+    await trust_score_service.refresh_trust_score(conn, reviewee_id)
+    await invalidate_cache_scope("user_rating", "user", reviewee_id)
 
     # 7. Bonus XP for 5-star review → reviewer (with level-up check)
     xp_bonus = 0
     if rating == 5:
         xp_bonus = REVIEW_BONUS_XP
+        # P1 R-02 FIX: Use FOR UPDATE to prevent lost-update race on concurrent XP grants
         reviewer_row = await conn.fetchrow(
-            "SELECT xp, level, grade FROM users WHERE id = $1", reviewer_id
+            "SELECT xp, level, grade FROM users WHERE id = $1 FOR UPDATE", reviewer_id
         )
         if reviewer_row:
             from app.models.user import GradeEnum
             new_xp = reviewer_row["xp"] + xp_bonus
             current_grade = GradeEnum(reviewer_row["grade"])
-            level_up, new_grade, new_level = check_level_up(new_xp, current_grade)
+            level_up, new_grade, new_level, _ = check_level_up(new_xp, current_grade)
             new_xp_to_next = calculate_xp_to_next(new_xp, new_grade)
             await conn.execute(
                 """
@@ -171,8 +178,8 @@ async def create_review(
             )
             for b in reviewee_result.newly_earned:
                 badges_earned.append({"user_id": reviewee_id, "badge_name": b.badge_name, "badge_icon": b.badge_icon})
-    except Exception:
-        logger.warning("Badge check after review failed (non-critical)", exc_info=True)
+    except (KeyError, TypeError, AttributeError, LookupError) as exc:
+        logger.warning("Badge check after review failed (non-critical): %s", exc, exc_info=True)
 
     return {
         "id": review_id,
@@ -208,7 +215,7 @@ async def get_reviews_for_user(
         user_id,
     )
     avg = await conn.fetchval(
-        "SELECT AVG(rating)::DOUBLE PRECISION FROM quest_reviews WHERE reviewee_id = $1",
+        "SELECT AVG(rating)::NUMERIC(3,2) FROM quest_reviews WHERE reviewee_id = $1",
         user_id,
     )
     rows = await conn.fetch(
@@ -249,6 +256,7 @@ async def get_reviews_for_user(
     }
 
 
+@redis_cache(ttl_seconds=120, key_prefix="user_rating", scope_builder=lambda conn, user_id: f"user:{user_id}")
 async def get_user_rating(
     conn: asyncpg.Connection,
     user_id: str,
@@ -256,7 +264,7 @@ async def get_user_rating(
     """Quick aggregation: avg_rating + review_count for a single user."""
     row = await conn.fetchrow(
         """
-        SELECT AVG(rating)::DOUBLE PRECISION AS avg_rating, COUNT(*) AS review_count
+        SELECT AVG(rating)::NUMERIC(3,2) AS avg_rating, COUNT(*) AS review_count
         FROM quest_reviews
         WHERE reviewee_id = $1
         """,
@@ -287,14 +295,22 @@ async def has_reviewed(
 # ────────────────────────────────────────────
 
 async def _refresh_user_rating(conn: asyncpg.Connection, user_id: str) -> None:
-    """Recalculate and cache avg_rating & review_count on the users row."""
+    """Recalculate and cache avg_rating & review_count on the users row.
+
+    P2 D-02 FIX: Lock the user row first to prevent concurrent reviews
+    from overwriting each other's cached rating.
+    """
+    # Lock user row to serialise concurrent rating refreshes
+    await conn.fetchrow(
+        "SELECT id FROM users WHERE id = $1 FOR UPDATE", user_id
+    )
     await conn.execute(
         """
         UPDATE users
         SET avg_rating = sub.avg_r,
             review_count = sub.cnt
         FROM (
-            SELECT AVG(rating)::DOUBLE PRECISION AS avg_r, COUNT(*) AS cnt
+            SELECT AVG(rating)::NUMERIC(3,2) AS avg_r, COUNT(*) AS cnt
             FROM quest_reviews
             WHERE reviewee_id = $1
         ) sub

@@ -4,7 +4,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Test Completion Flow" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
-$API_URL = "http://localhost:8000/api/v1"
+$API_URL = "http://localhost:8001/api/v1"
 
 Write-Host "`n[1/6] Login as CLIENT..." -ForegroundColor Yellow
 $clientLogin = '{"username":"novice_dev","password":"password123"}'

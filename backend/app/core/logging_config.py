@@ -18,6 +18,17 @@ class SimpleJsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
+        # Inject request-scoped context when available
+        try:
+            from app.main import request_id_var, request_user_var
+            rid = request_id_var.get("-")
+            uid = request_user_var.get("-")
+            if rid != "-":
+                payload["request_id"] = rid
+            if uid != "-":
+                payload["user_id"] = uid
+        except Exception:
+            pass
         if record.exc_info:
             payload["exc_info"] = self.formatException(record.exc_info)
         try:

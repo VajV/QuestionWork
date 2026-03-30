@@ -88,10 +88,11 @@ def upgrade() -> None:
 
     import bcrypt
     import os
+    import secrets
 
-    # Seed passwords from environment variables; fall back to random secrets in production.
-    _default_freelancer_pwd = os.environ.get("SEED_FREELANCER_PASSWORD", "password123")
-    _default_client_pwd = os.environ.get("SEED_CLIENT_PASSWORD", "client123")
+    # Seed passwords from environment variables; generate random if not set (never use weak defaults).
+    _default_freelancer_pwd = os.environ.get("SEED_FREELANCER_PASSWORD") or secrets.token_urlsafe(24)
+    _default_client_pwd = os.environ.get("SEED_CLIENT_PASSWORD") or secrets.token_urlsafe(24)
 
     pwd_freelancer = bcrypt.hashpw(_default_freelancer_pwd.encode(), bcrypt.gensalt()).decode("utf-8")
     pwd_client = bcrypt.hashpw(_default_client_pwd.encode(), bcrypt.gensalt()).decode("utf-8")
@@ -100,13 +101,15 @@ def upgrade() -> None:
     # Skipped when APP_ENV=production.
     _app_env = os.environ.get("APP_ENV", "development").lower()
     if _app_env not in ("production", "prod"):
-        op.execute(f"""
+        op.execute(
+            sa.text("""
         INSERT INTO users (id, username, email, password_hash, role, level, grade, xp, xp_to_next, stats_int, stats_dex, stats_cha, badges, bio, skills, created_at, updated_at)
         VALUES
-        ('user_123456', 'novice_dev', 'novice@example.com', '{pwd_freelancer}', 'freelancer', 1, 'novice', 0, 100, 10, 10, 10, '[]', NULL, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-        ('user_client_001', 'client_user', 'client@example.com', '{pwd_client}', 'client', 1, 'novice', 0, 100, 10, 10, 10, '[]', NULL, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ('user_123456', 'novice_dev', 'novice@example.com', :pwd_freelancer, 'freelancer', 1, 'novice', 0, 100, 10, 10, 10, '[]', NULL, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('user_client_001', 'client_user', 'client@example.com', :pwd_client, 'client', 1, 'novice', 0, 100, 10, 10, 10, '[]', NULL, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ON CONFLICT DO NOTHING;
-        """)
+        """).bindparams(pwd_freelancer=pwd_freelancer, pwd_client=pwd_client)
+        )
 
 
 def downgrade() -> None:

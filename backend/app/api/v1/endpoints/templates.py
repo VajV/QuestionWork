@@ -21,7 +21,7 @@ from app.api.deps import require_auth
 from app.core.ratelimit import check_rate_limit, get_client_ip
 from app.db.session import get_db_connection
 from app.models.user import UserProfile
-from app.models.quest import QuestCreate, Quest, GradeEnum
+from app.models.quest import QuestCreate, Quest, GradeEnum, CurrencyEnum
 from app.services import template_service, quest_service
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ class CreateTemplateRequest(BaseModel):
     required_grade: str = Field("novice", description="Мин. грейд")
     skills: List[str] = Field(default_factory=list, max_length=20)
     budget: Decimal = Field(Decimal("0"), ge=0, le=1_000_000)
-    currency: str = Field("RUB")
+    currency: CurrencyEnum = CurrencyEnum.RUB
     is_urgent: bool = False
     required_portfolio: bool = False
 
@@ -50,7 +50,7 @@ class UpdateTemplateRequest(BaseModel):
     required_grade: Optional[str] = None
     skills: Optional[List[str]] = None
     budget: Optional[Decimal] = Field(None, ge=0, le=1_000_000)
-    currency: Optional[str] = None
+    currency: Optional[CurrencyEnum] = None
     is_urgent: Optional[bool] = None
     required_portfolio: Optional[bool] = None
 
@@ -96,7 +96,7 @@ async def create_template(
 ):
     """Create a quest template."""
     ip = get_client_ip(request)
-    check_rate_limit(ip, action="create_template", limit=20, window_seconds=60)
+    await check_rate_limit(ip, action="create_template", limit=20, window_seconds=60)
     if current_user.role not in {"client", "admin"}:
         raise HTTPException(status_code=403, detail="Только заказчики и администраторы могут создавать шаблоны")
 
@@ -153,7 +153,7 @@ async def update_template(
 ):
     """Update a template."""
     ip = get_client_ip(request)
-    check_rate_limit(ip, action="update_template", limit=30, window_seconds=60)
+    await check_rate_limit(ip, action="update_template", limit=30, window_seconds=60)
     updates = body.model_dump(exclude_none=True)
     async with conn.transaction():
         result = await template_service.update_template(conn, template_id, current_user.id, **updates)
@@ -171,7 +171,7 @@ async def delete_template(
 ):
     """Delete a template."""
     ip = get_client_ip(request)
-    check_rate_limit(ip, action="delete_template", limit=15, window_seconds=60)
+    await check_rate_limit(ip, action="delete_template", limit=15, window_seconds=60)
     async with conn.transaction():
         deleted = await template_service.delete_template(conn, template_id, current_user.id)
     if not deleted:
@@ -188,7 +188,7 @@ async def create_quest_from_template(
 ):
     """Create a quest from a template, optionally overriding fields."""
     ip = get_client_ip(request)
-    check_rate_limit(ip, action="create_quest_from_template", limit=20, window_seconds=60)
+    await check_rate_limit(ip, action="create_quest_from_template", limit=20, window_seconds=60)
     if current_user.role not in {"client", "admin"}:
         raise HTTPException(status_code=403, detail="Только заказчики и администраторы могут создавать квесты")
 
@@ -202,7 +202,7 @@ async def create_quest_from_template(
         description = (body.description if body and body.description else tpl["description"]) or "Описание квеста из шаблона"
         budget = body.budget if (body and body.budget is not None) else tpl["budget"]
         if budget is None:
-            budget = 100.0
+            budget = Decimal("100")
         is_urgent = body.is_urgent if body and body.is_urgent is not None else tpl["is_urgent"]
 
         # Ensure description meets QuestCreate minimum (20 chars)

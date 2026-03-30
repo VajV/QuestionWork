@@ -5,13 +5,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone
 
 from app.services.wallet_service import (
+    ALLOWED_TRANSACTION_STATUSES,
+    ALLOWED_TRANSACTION_TYPES,
     credit,
     debit,
     get_balance,
     get_all_balances,
+    get_total_earned,
     get_transaction_history,
     InsufficientFundsError,
+    EscrowMismatchError,
     _assert_in_transaction,
+    quantize_money,
+    split_payment,
 )
 
 
@@ -55,14 +61,14 @@ class TestGetBalance:
         conn.fetchrow.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_creates_wallet_if_missing(self):
+    async def test_returns_zero_if_wallet_missing(self):
         conn = _make_conn()
         conn.fetchrow.return_value = None  # no wallet
 
         result = await get_balance(conn, "user_1", "RUB")
 
         assert result == 0.0
-        conn.execute.assert_called_once()  # INSERT ... ON CONFLICT
+        conn.execute.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -114,13 +120,15 @@ class TestCredit:
     @pytest.mark.asyncio
     async def test_credit_creates_wallet_if_missing(self):
         conn = _make_conn()
-        conn.fetchrow.return_value = None  # no wallet
+        # First fetchrow: SELECT FOR UPDATE → None (no wallet)
+        # Second fetchrow: INSERT...ON CONFLICT...RETURNING → balance
+        conn.fetchrow.side_effect = [None, {"balance": 300.0}]
 
         new_balance = await credit(conn, "user_1", 300.0, "RUB")
 
         assert new_balance == 300.0
-        # INSERT wallet + INSERT transaction = 2 execute calls
-        assert conn.execute.call_count == 2
+        # Only INSERT transaction via execute (wallet INSERT is now fetchrow with RETURNING)
+        assert conn.execute.call_count == 1
 
     @pytest.mark.asyncio
     async def test_credit_rejects_non_positive(self):
@@ -131,6 +139,27 @@ class TestCredit:
 
         with pytest.raises(ValueError, match="positive"):
             await credit(conn, "user_1", -10, "RUB")
+
+    @pytest.mark.asyncio
+    async def test_credit_rejects_unsupported_transaction_type(self):
+        conn = _make_conn()
+        conn.fetchrow.return_value = _wallet_row(balance=500.0)
+
+        with pytest.raises(ValueError, match="Unsupported transaction type"):
+            await credit(conn, "user_1", 50.0, "RUB", tx_type="bad_type")
+
+    @pytest.mark.asyncio
+    async def test_credit_quantizes_amount_and_balance(self):
+        conn = _make_conn()
+        conn.fetchrow.return_value = _wallet_row(balance=500.005)
+
+        new_balance = await credit(conn, "user_1", 200.005, "RUB")
+
+        assert new_balance == quantize_money("700.02")
+        wallet_update_args = conn.execute.call_args_list[0][0]
+        tx_insert_args = conn.execute.call_args_list[1][0]
+        assert wallet_update_args[1] == quantize_money("700.02")
+        assert tx_insert_args[4] == quantize_money("200.01")
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +191,7 @@ class TestDebit:
         conn = _make_conn()
         conn.fetchrow.return_value = None
 
-        with pytest.raises(InsufficientFundsError, match="No wallet"):
+        with pytest.raises(InsufficientFundsError, match="Insufficient funds"):
             await debit(conn, "user_1", 100.0, "RUB")
 
     @pytest.mark.asyncio
@@ -181,6 +210,71 @@ class TestDebit:
         new_balance = await debit(conn, "user_1", 500.0, "RUB")
         assert new_balance == 0.0
 
+    @pytest.mark.asyncio
+    async def test_debit_quantizes_amount_and_balance(self):
+        conn = _make_conn()
+        conn.fetchrow.return_value = _wallet_row(balance=1000.005)
+
+        new_balance = await debit(conn, "user_1", 300.005, "RUB")
+
+        assert new_balance == quantize_money("700.00")
+        wallet_update_args = conn.execute.call_args_list[0][0]
+        tx_insert_args = conn.execute.call_args_list[1][0]
+        assert wallet_update_args[1] == quantize_money("700.00")
+        assert tx_insert_args[4] == quantize_money("300.01")
+
+
+class TestMoneyNormalization:
+    def test_quantize_money_rounds_half_up(self):
+        assert quantize_money("10") == quantize_money("10.00")
+        assert quantize_money("10.004") == quantize_money("10.00")
+        assert quantize_money("10.005") == quantize_money("10.01")
+
+    def test_allowed_transaction_sets_match_batch1_constraints(self):
+        assert ALLOWED_TRANSACTION_TYPES == {
+            "income",
+            "expense",
+            "hold",
+            "refund",
+            "urgent_bonus_charge",
+            "urgent_bonus",
+            "commission",
+            "withdrawal",
+            "admin_adjust",
+            "credit",
+            "quest_payment",
+            "release",
+            "platform_fee",
+        }
+        assert ALLOWED_TRANSACTION_STATUSES == {
+            "pending",
+            "completed",
+            "rejected",
+            "refunded",
+            "held",
+            "failed",
+        }
+
+
+class TestSplitPayment:
+    @pytest.mark.asyncio
+    async def test_rejects_hold_amount_mismatch(self):
+        conn = _make_conn()
+        conn.fetchrow.side_effect = [
+            {"id": "hold_1", "amount": 1000.0},
+        ]
+
+        with pytest.raises(EscrowMismatchError, match="Escrow hold amount does not match payout amount"):
+            await split_payment(
+                conn,
+                client_id="client_1",
+                freelancer_id="fl_1",
+                gross_amount=1500.0,
+                currency="RUB",
+                quest_id="quest_1",
+                fee_percent=10,
+            )
+
 
 # ---------------------------------------------------------------------------
 # get_transaction_history
@@ -198,6 +292,7 @@ class TestTransactionHistory:
                 "amount": 1000.0,
                 "currency": "RUB",
                 "type": "income",
+                "status": "completed",
                 "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
             }
         ]
@@ -207,6 +302,7 @@ class TestTransactionHistory:
         assert len(result) == 1
         assert result[0]["type"] == "income"
         assert result[0]["amount"] == 1000.0
+        assert result[0]["status"] == "completed"
 
     @pytest.mark.asyncio
     async def test_empty_history(self):
@@ -245,3 +341,61 @@ class TestTransactionGuard:
         conn.is_in_transaction.return_value = False
         with pytest.raises(RuntimeError, match="explicit DB transaction"):
             _assert_in_transaction(conn)
+
+
+# ---------------------------------------------------------------------------
+# P0-2: get_total_earned uses correct transaction types
+# ---------------------------------------------------------------------------
+
+
+class TestGetTotalEarned:
+    @pytest.mark.asyncio
+    async def test_total_earned_after_quest_completion(self):
+        """get_total_earned sums 'income' and 'commission' with status='completed'."""
+        conn = _make_conn()
+        conn.fetchrow.return_value = {"total": 1500.0}
+
+        result = await get_total_earned(conn, "user_1")
+
+        assert result == 1500.0
+        # Verify the SQL uses correct types
+        call_args = conn.fetchrow.call_args
+        sql = call_args[0][0]
+        assert "'income'" in sql
+        assert "'commission'" in sql
+        assert "status = 'completed'" in sql
+        # Old wrong types must NOT appear
+        assert "'credit'" not in sql
+        assert "'quest_payment'" not in sql
+
+    @pytest.mark.asyncio
+    async def test_total_earned_zero_when_no_transactions(self):
+        conn = _make_conn()
+        conn.fetchrow.return_value = {"total": 0}
+
+        result = await get_total_earned(conn, "user_1")
+        assert result == 0
+
+
+# ---------------------------------------------------------------------------
+# P0-3: concurrent first-credit race condition
+# ---------------------------------------------------------------------------
+
+
+class TestConcurrentCredit:
+    @pytest.mark.asyncio
+    async def test_concurrent_first_credit_no_race(self):
+        """When wallet doesn't exist, credit uses INSERT...ON CONFLICT
+        so concurrent calls don't crash with UniqueViolationError."""
+        conn = _make_conn()
+        # SELECT FOR UPDATE returns None, INSERT ON CONFLICT RETURNING returns balance
+        conn.fetchrow.side_effect = [None, {"balance": 500.0}]
+
+        result = await credit(conn, "user_1", 500.0, "RUB")
+
+        assert result == 500.0
+        # Verify the INSERT uses ON CONFLICT
+        insert_call = conn.fetchrow.call_args_list[1]
+        sql = insert_call[0][0]
+        assert "ON CONFLICT" in sql
+        assert "user_id, currency" in sql

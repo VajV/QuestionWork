@@ -2,6 +2,57 @@
 
 This repository contains a full-stack monorepo: FastAPI backend and Next.js frontend.
 
+Environment contract
+--------------------
+
+The backend now treats infrastructure URLs differently by environment.
+
+| APP_ENV | DATABASE_URL | REDIS_URL | Notes |
+| --- | --- | --- | --- |
+| `development` / `dev` | optional local default allowed | optional local default allowed | Intended for local workstations only |
+| `staging` | required explicit value | required explicit value | Startup fails if localhost defaults are used |
+| `production` / `prod` | required explicit value | required explicit value | Startup also requires `COOKIE_SECURE=True` and non-empty `ADMIN_IP_ALLOWLIST` |
+
+Minimal backend env examples:
+
+Development:
+
+```env
+APP_ENV=development
+SECRET_KEY=replace-with-local-dev-secret
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/questionwork
+REDIS_URL=redis://localhost:6379
+FRONTEND_URL=http://localhost:3000
+```
+
+Staging / production:
+
+```env
+APP_ENV=staging
+SECRET_KEY=replace-with-real-secret
+DATABASE_URL=postgresql://user:password@db-host:5432/questionwork
+REDIS_URL=redis://redis-host:6379/0
+FRONTEND_URL=https://your-frontend.example.com
+```
+
+Deployment note: withdrawal auto-approve cutover
+-----------------------------------------------
+
+When `WITHDRAWAL_AUTO_APPROVE_JOBS_ENABLED=true`, withdrawal auto-approval ownership moves to the trust-layer `worker` + `scheduler` runtime.
+
+Forbidden process in this mode:
+- `backend/scripts/process_withdrawals.py`
+
+Required rollout rule:
+- disable any cron, Task Scheduler, container command, or process manager entry that still runs `process_withdrawals.py` before enabling `WITHDRAWAL_AUTO_APPROVE_JOBS_ENABLED`
+- only then start or restart the trust-layer worker and scheduler processes
+
+If the legacy script is started by mistake while the flag is enabled, it now fails immediately with a guard error instead of running alongside the new job path.
+
+Detailed ops docs:
+- `docs/ops-withdrawal-cutover-runbook.md`
+- `docs/withdrawal-cutover-deploy-checklist.md`
+
 Quickstart (local development):
 
 1. Backend
@@ -13,7 +64,7 @@ pip install -r requirements.txt
 # create a .env from the example and fill values
 copy ..\.env.example .env
 # start the app
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
 2. Frontend
@@ -33,6 +84,14 @@ This project uses Postgres and Alembic for migrations. By default the app expect
 Tests are run with `pytest` (backend) and `npm test` (frontend). CI is planned to run lint, tests and build steps.
 
 More details in `CLAUDE.md`.
+
+Copilot customizations
+----------------------
+
+This repository ships native Copilot instructions, skills, agents, prompts, hooks, and a validated workspace MCP config.
+
+Quick reference:
+- `docs/copilot-customizations.md`
 
 Development with Docker
 -----------------------
@@ -58,7 +117,7 @@ cd backend
 ```powershell
 # Показывает состояние контейнеров
 docker compose -f docker-compose.dev.yml ps
-# Backend: http://localhost:8000/docs
+# Backend: http://localhost:8001/docs
 # Frontend: http://localhost:3000
 ```
 
@@ -112,9 +171,9 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 
 ```powershell
 docker logs -f questionwork_otel_collector
+```
 
-View in Jaeger UI
------------------
+### View in Jaeger UI
 
 The Jaeger all-in-one UI is exposed at:
 
@@ -123,7 +182,6 @@ http://localhost:16686
 ```
 
 Open the UI and search traces by service name `questionwork-backend` (or the value you set in `OTEL_SERVICE_NAME`).
-```
 
 You should see trace records logged by the collector. For production you'll typically configure the collector to export to a tracing backend (Jaeger, Tempo, Honeycomb, etc.).
 

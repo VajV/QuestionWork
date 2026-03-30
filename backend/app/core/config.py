@@ -22,11 +22,11 @@ class Settings(BaseSettings):
     APP_NAME: str = "QuestionWork"
     APP_ENV: str = "development"
     DEBUG: bool = False
-    SECRET_KEY: str = "change-me-in-production"
+    SECRET_KEY: str = ""
     
     # Server
     HOST: str = "127.0.0.1"
-    PORT: int = 8000
+    PORT: int = 8001
     
     # Database
     DATABASE_URL: str = DEV_DATABASE_URL
@@ -67,16 +67,17 @@ class Settings(BaseSettings):
     WITHDRAWAL_AUTO_APPROVE_JOBS_ENABLED: bool = False
     WITHDRAWAL_AUTO_APPROVE_BATCH_LIMIT: int = 100
 
-    # RPG balance
-    RPG_XP_PER_BUDGET_RATIO: float = 0.1
+    # RPG balance (string defaults → parsed as Decimal at point of use)
+    RPG_XP_PER_BUDGET_RATIO: str = "0.1"
     RPG_MAX_XP_REWARD: int = 500
     RPG_MIN_XP_REWARD: int = 10
-    RPG_COMPLEXITY_BONUS_MULTIPLIER: float = 1.5
+    RPG_COMPLEXITY_BONUS_MULTIPLIER: str = "1.5"
     RPG_GRADE_XP_THRESHOLDS: str = "500,2000,5000"
     RPG_CLASS_LEVEL_THRESHOLDS: str = "0,500,1500,3000,6000,10000,16000,24000,35000,50000"
 
     # Operations / Admin
     NOTIFICATION_RETENTION_DAYS: int = 30        # prune read notifications older than N days
+    ANALYTICS_EVENTS_RETENTION_DAYS: int = 90    # prune analytics events older than N days
     ADMIN_DEFAULT_PASSWORD: Optional[str] = None # if set, seeds a default admin user on migration
 
     # Admin security hardening
@@ -84,13 +85,23 @@ class Settings(BaseSettings):
     # Empty string = allow all (development default). In production set to your ops IPs.
     ADMIN_IP_ALLOWLIST: str = ""
     # When True every admin HTTP request must include a valid X-TOTP-Token header.
-    ADMIN_TOTP_REQUIRED: bool = False
+    # Default is True (secure-by-default). Override with ADMIN_TOTP_REQUIRED=false in .env for local dev.
+    ADMIN_TOTP_REQUIRED: bool = True
     # Separate encryption key for TOTP secrets. When empty, falls back to domain-separated SECRET_KEY derivation.
     TOTP_ENCRYPTION_KEY: str = ""
 
     # Alerting
     # Slack incoming-webhook URL. When set, the cron scripts post summaries/errors.
     SLACK_WEBHOOK_URL: Optional[str] = None
+
+    # Email / SMTP (all optional — set in .env to enable transactional emails)
+    EMAILS_ENABLED: bool = False
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "noreply@questionwork.com"
+    SMTP_TLS: bool = True
 
     # Backup
     BACKUP_DIR: str = "/var/backups/questionwork"  # override in .env
@@ -99,6 +110,10 @@ class Settings(BaseSettings):
     # OpenRouter API
     OPENROUTER_API_KEY: Optional[str] = None
     OPENROUTER_MODEL: str = "qwen/qwen-2.5-coder-32b-instruct"
+    # E2E testing: bypass login rate-limits when header matches this secret.
+    # Disabled by default; never enable in production.
+    E2E_RATE_LIMIT_BYPASS_SECRET: str = ""
+
     # Sentry (error reporting)
     SENTRY_DSN: Optional[str] = None
     SENTRY_TRACES_SAMPLE_RATE: float = 0.0
@@ -213,9 +228,19 @@ def _validate_settings(s: Settings) -> None:
         raise RuntimeError("RPG_MIN_XP_REWARD must be >= 0")
     if s.RPG_MAX_XP_REWARD < s.RPG_MIN_XP_REWARD:
         raise RuntimeError("RPG_MAX_XP_REWARD must be >= RPG_MIN_XP_REWARD")
-    if s.RPG_XP_PER_BUDGET_RATIO <= 0:
+
+    from decimal import Decimal as _D, InvalidOperation
+    try:
+        _ratio = _D(s.RPG_XP_PER_BUDGET_RATIO)
+    except (InvalidOperation, ValueError):
+        raise RuntimeError(f"RPG_XP_PER_BUDGET_RATIO={s.RPG_XP_PER_BUDGET_RATIO!r} is not a valid decimal number")
+    if _ratio <= 0:
         raise RuntimeError("RPG_XP_PER_BUDGET_RATIO must be > 0")
-    if s.RPG_COMPLEXITY_BONUS_MULTIPLIER < 1.0:
+    try:
+        _mult = _D(s.RPG_COMPLEXITY_BONUS_MULTIPLIER)
+    except (InvalidOperation, ValueError):
+        raise RuntimeError(f"RPG_COMPLEXITY_BONUS_MULTIPLIER={s.RPG_COMPLEXITY_BONUS_MULTIPLIER!r} is not a valid decimal number")
+    if _mult < 1:
         raise RuntimeError("RPG_COMPLEXITY_BONUS_MULTIPLIER must be >= 1.0")
 
     if s.DB_POOL_MIN_SIZE > s.DB_POOL_MAX_SIZE:
@@ -233,6 +258,8 @@ def _validate_settings(s: Settings) -> None:
         raise RuntimeError("ORPHANED_QUEUED_RECOVERY_INTERVAL_SECONDS must be > 0")
     if s.RUNTIME_HEARTBEAT_RETENTION_SECONDS <= 0:
         raise RuntimeError("RUNTIME_HEARTBEAT_RETENTION_SECONDS must be > 0")
+    if s.ANALYTICS_EVENTS_RETENTION_DAYS <= 0:
+        raise RuntimeError("ANALYTICS_EVENTS_RETENTION_DAYS must be > 0")
     if s.STALE_RUNNING_TIMEOUT_SECONDS <= s.WORKER_HEARTBEAT_INTERVAL_SECONDS:
         raise RuntimeError(
             "STALE_RUNNING_TIMEOUT_SECONDS must be greater than WORKER_HEARTBEAT_INTERVAL_SECONDS"
@@ -281,15 +308,22 @@ def _validate_settings(s: Settings) -> None:
                 "ADMIN_TOTP_REQUIRED is True but 'pyotp' package is not installed. "
                 "Install it with: pip install pyotp"
             )
-
-    # Economy validations
-    try:
-        fee = float(s.PLATFORM_FEE_PERCENT)
-        if fee < 0 or fee > 50:
+        # Task 3.5: TOTP_ENCRYPTION_KEY must be set when TOTP is required
+        if not (s.TOTP_ENCRYPTION_KEY or "").strip():
             raise RuntimeError(
-                f"PLATFORM_FEE_PERCENT={s.PLATFORM_FEE_PERCENT} is out of range. Must be 0..50."
+                "TOTP_ENCRYPTION_KEY must be set when ADMIN_TOTP_REQUIRED is True. "
+                "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
             )
-    except ValueError:
+
+    # Economy validations (P2-03: use Decimal, align cap with wallet_service._MAX_FEE_PERCENT=30)
+    try:
+        from decimal import Decimal as _D_fee, InvalidOperation as _IO_fee
+        fee = _D_fee(s.PLATFORM_FEE_PERCENT)
+        if fee < 0 or fee > 30:
+            raise RuntimeError(
+                f"PLATFORM_FEE_PERCENT={s.PLATFORM_FEE_PERCENT} is out of range. Must be 0..30."
+            )
+    except (_IO_fee, ValueError):
         raise RuntimeError(
             f"PLATFORM_FEE_PERCENT={s.PLATFORM_FEE_PERCENT!r} is not a valid number."
         )

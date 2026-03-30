@@ -6,7 +6,7 @@ $ErrorActionPreference  = "SilentlyContinue"
 $ProgressPreference     = "SilentlyContinue"   # suppress Invoke-WebRequest progress bar noise
 $VerbosePreference      = "SilentlyContinue"
 
-$BASE_URL = "http://localhost:8000/api/v1"
+$BASE_URL = "http://localhost:8001/api/v1"
 
 # ---------------------------------------------------------------------------
 # Counters and log
@@ -137,11 +137,11 @@ Write-Host "  =============================================" -ForegroundColor Ma
 
 Write-Header "PRE-FLIGHT: Checking backend and PostgreSQL availability"
 
-Write-Step "Connecting to http://localhost:8000/health ..."
+Write-Step "Connecting to http://localhost:8001/health ..."
 
 $healthOk = $false
 try {
-    $hr = Invoke-WebRequest -Uri "http://localhost:8000/health" `
+    $hr = Invoke-WebRequest -Uri "http://localhost:8001/health" `
               -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
     $healthOk = ($hr.StatusCode -eq 200)
 } catch {
@@ -149,7 +149,7 @@ try {
 }
 
 if (-not $healthOk) {
-    Write-Fail "Backend health check" "http://localhost:8000/health did not respond"
+    Write-Fail "Backend health check" "http://localhost:8001/health did not respond"
     Write-Host ""
     Write-Host "  [ABORT] Backend is not running. Start it first:" -ForegroundColor Red
     Write-Host "          cd backend"                               -ForegroundColor Yellow
@@ -159,7 +159,7 @@ if (-not $healthOk) {
     exit 1
 }
 
-Write-Pass "Backend health check" "http://localhost:8000/health => 200 OK"
+Write-Pass "Backend health check" "http://localhost:8001/health => 200 OK"
 
 Write-Step "Checking PostgreSQL TCP port 5432 ..."
 $dbPortOk = $false
@@ -250,8 +250,8 @@ if ($regClient.Ok) {
 # Duplicate registration must fail
 Write-Step "POST /auth/register -- duplicate => expect 400"
 $dupClient = Invoke-Api -Method POST -Endpoint "/auth/register" -Body $regClientBody
-if (-not $dupClient.Ok -and $dupClient.StatusCode -eq 400) {
-    Write-Pass "Duplicate registration rejected" "HTTP 400"
+if (-not $dupClient.Ok -and ($dupClient.StatusCode -eq 400 -or $dupClient.StatusCode -eq 409)) {
+    Write-Pass "Duplicate registration rejected" "HTTP $($dupClient.StatusCode)"
 } else {
     Write-Fail "Duplicate registration should be rejected" "HTTP $($dupClient.StatusCode)"
 }
@@ -317,6 +317,45 @@ if ($loginFreelancer.Ok -and $loginFreelancer.StatusCode -eq 200) {
     $freelancerToken = $loginFreelancer.Data.access_token
 } else {
     Write-Fail "Freelancer login" "HTTP $($loginFreelancer.StatusCode)"
+}
+
+# ===========================================================================
+Write-Header "STEP 3B: Seed Admin And Fund Client Wallet"
+# ===========================================================================
+
+$adminToken = $null
+
+Write-Step "Seed default admin user"
+try {
+    & ".\backend\.venv\Scripts\python.exe" ".\backend\scripts\seed_admin.py" | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Pass "Admin seed" "backend/scripts/seed_admin.py"
+    } else {
+        Write-Fail "Admin seed" "Exit code $LASTEXITCODE"
+    }
+} catch {
+    Write-Fail "Admin seed" $_.Exception.Message
+}
+
+Write-Step "POST /auth/login  (admin)"
+$loginAdminBody = (@{ username = "admin"; password = "Admin123!" } | ConvertTo-Json -Compress)
+$loginAdmin = Invoke-Api -Method POST -Endpoint "/auth/login" -Body $loginAdminBody
+if ($loginAdmin.Ok -and $loginAdmin.StatusCode -eq 200) {
+    Write-Pass "Admin login" "token received"
+    $adminToken = $loginAdmin.Data.access_token
+} else {
+    Write-Fail "Admin login" "HTTP $($loginAdmin.StatusCode)"
+}
+
+if ($adminToken -and $clientId) {
+    Write-Step "POST /admin/users/$clientId/adjust-wallet  (fund escrow)"
+    $fundBody = (@{ amount = 20000; currency = "RUB"; reason = "E2E escrow funding" } | ConvertTo-Json -Compress)
+    $fundResp = Invoke-Api -Method POST -Endpoint "/admin/users/$clientId/adjust-wallet" -Headers (Get-AuthHeader $adminToken) -Body $fundBody
+    if ($fundResp.Ok -and $fundResp.StatusCode -eq 200) {
+        Write-Pass "Client wallet funded" "new_balance=$($fundResp.Data.new_balance) RUB"
+    } else {
+        Write-Fail "Client wallet funding" "HTTP $($fundResp.StatusCode) -- $($fundResp.Raw)"
+    }
 }
 
 # ===========================================================================
@@ -571,7 +610,7 @@ if ($questId -and $clientToken -and $freelancerId) {
         Write-Pass "Quest assigned" "status=$($assignResp.Data.quest.status)"
         $as = $assignResp.Data.quest.status
         $at = $assignResp.Data.quest.assigned_to
-        if ($as -eq "in_progress") { Write-Pass "Status changed to in_progress" } else { Write-Fail "Status should be in_progress" "got $as" }
+        if ($as -eq "assigned") { Write-Pass "Status changed to assigned" } else { Write-Fail "Status should be assigned" "got $as" }
         if ($at -eq $freelancerId)  { Write-Pass "assigned_to matches freelancer id" } else { Write-Fail "assigned_to mismatch" "got $at" }
     } else {
         Write-Fail "Assign quest" "HTTP $($assignResp.StatusCode) -- $($assignResp.Raw)"
@@ -581,7 +620,30 @@ if ($questId -and $clientToken -and $freelancerId) {
 }
 
 # ===========================================================================
-Write-Header "STEP 11: Complete Quest (as Freelancer)"
+Write-Header "STEP 11: Start Quest (as Freelancer)"
+# ===========================================================================
+
+if ($questId -and $freelancerToken) {
+    Write-Step "POST /quests/$questId/start"
+    $startResp = Invoke-Api -Method POST -Endpoint "/quests/$questId/start" `
+                            -Headers (Get-AuthHeader $freelancerToken)
+
+    if ($startResp.Ok -and $startResp.StatusCode -eq 200) {
+        Write-Pass "Quest started by freelancer" "status=$($startResp.Data.quest.status)"
+        if ($startResp.Data.quest.status -eq "in_progress") {
+            Write-Pass "Status changed to in_progress"
+        } else {
+            Write-Fail "Status should be in_progress" "got $($startResp.Data.quest.status)"
+        }
+    } else {
+        Write-Fail "Start quest" "HTTP $($startResp.StatusCode) -- $($startResp.Raw)"
+    }
+} else {
+    Write-Fail "Start quest" "Missing questId or freelancerToken -- skipping"
+}
+
+# ===========================================================================
+Write-Header "STEP 12: Complete Quest (as Freelancer)"
 # ===========================================================================
 
 if ($questId -and $freelancerToken) {
@@ -601,7 +663,7 @@ if ($questId -and $freelancerToken) {
 }
 
 # ===========================================================================
-Write-Header "STEP 12: Confirm Quest Completion (as Client)"
+Write-Header "STEP 13: Confirm Quest Completion (as Client)"
 # ===========================================================================
 
 if ($questId -and $clientToken) {
@@ -633,7 +695,7 @@ if ($questId -and $clientToken) {
 }
 
 # ===========================================================================
-Write-Header "STEP 13: Verify Final Quest State"
+Write-Header "STEP 14: Verify Final Quest State"
 # ===========================================================================
 
 if ($questId) {
@@ -643,10 +705,10 @@ if ($questId) {
     if ($finalQuest.Ok) {
         Write-Pass "GET final quest state" "status=$($finalQuest.Data.status)"
         $fs = $finalQuest.Data.status
-        if ($fs -eq "completed") {
-            Write-Pass "Quest final status = completed"
+        if ($fs -eq "confirmed") {
+            Write-Pass "Quest final status = confirmed"
         } else {
-            Write-Fail "Quest final status should be completed" "got $fs"
+            Write-Fail "Quest final status should be confirmed" "got $fs"
         }
         if ($null -ne $finalQuest.Data.completed_at) {
             Write-Pass "completed_at timestamp set" "$($finalQuest.Data.completed_at)"
@@ -659,7 +721,7 @@ if ($questId) {
 }
 
 # ===========================================================================
-Write-Header "STEP 14: Cancel Flow (separate quest)"
+Write-Header "STEP 15: Cancel Flow (separate quest)"
 # ===========================================================================
 
 if ($clientToken) {
@@ -817,7 +879,7 @@ Write-Host "    Freelancer : $freelancerUser  /  $freelancerPass" -ForegroundCol
 Write-Host ""
 Write-Host "  Quick links:" -ForegroundColor Gray
 Write-Host "    Frontend  : http://localhost:3000"       -ForegroundColor DarkGray
-Write-Host "    Swagger   : http://localhost:8000/docs"   -ForegroundColor DarkGray
-Write-Host "    Health    : http://localhost:8000/health" -ForegroundColor DarkGray
+Write-Host "    Swagger   : http://localhost:8001/docs"   -ForegroundColor DarkGray
+Write-Host "    Health    : http://localhost:8001/health" -ForegroundColor DarkGray
 Write-Host "    DB check  : .\scripts\test-db.ps1"        -ForegroundColor DarkGray
 Write-Host ""

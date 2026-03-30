@@ -2,10 +2,10 @@
 locustfile.py — Load-test baseline for QuestionWork backend.
 
 Run:
-    locust -f backend/tests/locustfile.py --host http://localhost:8000
+    locust -f backend/tests/locustfile.py --host http://localhost:8001
 
 Or headless (CI):
-    locust -f backend/tests/locustfile.py --host http://localhost:8000 \
+    locust -f backend/tests/locustfile.py --host http://localhost:8001 \
            --users 50 --spawn-rate 10 --run-time 60s --headless
 
 User mix (reflecting real traffic):

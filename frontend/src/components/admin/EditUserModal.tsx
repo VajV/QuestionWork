@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "@/lib/motion";
 import {
   X,
   Save,
@@ -24,11 +24,15 @@ import {
   adminUnbanUser,
   adminDeleteUser,
   adminGrantXP,
+  adminGrantPerkPoints,
   adminAdjustWallet,
   adminGrantBadge,
   adminRevokeBadge,
   adminChangeUserClass,
+  getClasses,
+  getApiErrorMessage,
 } from "@/lib/api";
+import type { CharacterClassInfo } from "@/lib/api";
 import type { AdminUserDetail } from "@/types";
 
 type Tab = "profile" | "economy" | "class" | "badges" | "danger";
@@ -38,6 +42,51 @@ interface Props {
   onClose: () => void;
   onUpdated: () => void;
 }
+
+const FALLBACK_CLASS_OPTIONS: Array<Pick<CharacterClassInfo, "class_id" | "name_ru" | "description_ru" | "color" | "icon">> = [
+  {
+    class_id: "berserk",
+    name_ru: "Берсерк",
+    description_ru: "Воин скорости и срочных контрактов.",
+    color: "#ef4444",
+    icon: "⚔️",
+  },
+  {
+    class_id: "rogue",
+    name_ru: "Роуг",
+    description_ru: "Мастер быстрых откликов и первых заявок.",
+    color: "#8b5cf6",
+    icon: "🗡️",
+  },
+  {
+    class_id: "alchemist",
+    name_ru: "Алхимик",
+    description_ru: "Эксперт по залежавшимся и выгодным задачам.",
+    color: "#14b8a6",
+    icon: "⚗️",
+  },
+  {
+    class_id: "paladin",
+    name_ru: "Паладин",
+    description_ru: "Надёжный исполнитель со ставкой на качество и стабильность.",
+    color: "#f59e0b",
+    icon: "🛡️",
+  },
+  {
+    class_id: "archmage",
+    name_ru: "Архимаг",
+    description_ru: "Специалист по сложным и дорогим контрактам.",
+    color: "#60a5fa",
+    icon: "✨",
+  },
+  {
+    class_id: "oracle",
+    name_ru: "Оракул",
+    description_ru: "Аналитик, который видит лучшие возможности заранее.",
+    color: "#ec4899",
+    icon: "🔮",
+  },
+];
 
 function Toast({ msg, type }: { msg: string; type: "ok" | "err" }) {
   return (
@@ -59,6 +108,7 @@ function Toast({ msg, type }: { msg: string; type: "ok" | "err" }) {
 
 export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
   const [user, setUser] = useState<AdminUserDetail | null>(null);
+  const [availableClasses, setAvailableClasses] = useState<CharacterClassInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("profile");
   const [saving, setSaving] = useState(false);
@@ -82,6 +132,8 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
   const [walletAmount, setWalletAmount] = useState(0);
   const [walletCurrency, setWalletCurrency] = useState("RUB");
   const [walletReason, setWalletReason] = useState("");
+  const [perkPointsAmount, setPerkPointsAmount] = useState(1);
+  const [perkPointsReason, setPerkPointsReason] = useState("");
 
   // Ban
   const [banReason, setBanReason] = useState("");
@@ -101,8 +153,12 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
   const loadUser = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await adminGetUserDetail(userId);
+      const [data, classesResponse] = await Promise.all([
+        adminGetUserDetail(userId),
+        getClasses().catch(() => ({ classes: FALLBACK_CLASS_OPTIONS as CharacterClassInfo[] })),
+      ]);
       setUser(data);
+      setAvailableClasses(classesResponse.classes?.length ? classesResponse.classes : (FALLBACK_CLASS_OPTIONS as CharacterClassInfo[]));
       setRole(data.role);
       setLevel(data.level);
       setGrade(data.grade);
@@ -149,8 +205,7 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
       await loadUser();
       onUpdated();
     } catch (e: unknown) {
-      const msg = e instanceof Response ? e.statusText : String(e);
-      flash(msg || "Ошибка", "err");
+      flash(getApiErrorMessage(e), "err");
     } finally {
       setSaving(false);
     }
@@ -158,6 +213,7 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
 
   const handleGrantXP = async () => {
     if (!xpAmount || !xpReason.trim()) { flash("Укажите количество и причину", "err"); return; }
+    if (xpAmount < 1) { flash("XP должен быть положительным числом", "err"); return; }
     setSaving(true);
     try {
       const r = await adminGrantXP(userId, xpAmount, xpReason);
@@ -166,8 +222,7 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
       await loadUser();
       onUpdated();
     } catch (e: unknown) {
-      const msg = e instanceof Response ? e.statusText : String(e);
-      flash(msg || "Ошибка", "err");
+      flash(getApiErrorMessage(e), "err");
     } finally {
       setSaving(false);
     }
@@ -178,13 +233,12 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
     setSaving(true);
     try {
       const r = await adminAdjustWallet(userId, walletAmount, walletCurrency, walletReason);
-      flash(`Баланс: ${r.old_balance} → ${r.new_balance} ${r.currency}`, "ok");
+      flash(`Баланс: ${r.old_balance.toLocaleString("ru-RU")} → ${r.new_balance.toLocaleString("ru-RU")} ${r.currency}`, "ok");
       setWalletAmount(0); setWalletReason("");
       await loadUser();
       onUpdated();
     } catch (e: unknown) {
-      const msg = e instanceof Response ? e.statusText : String(e);
-      flash(msg || "Ошибка", "err");
+      flash(getApiErrorMessage(e), "err");
     } finally {
       setSaving(false);
     }
@@ -200,8 +254,7 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
       await loadUser();
       onUpdated();
     } catch (e: unknown) {
-      const msg = e instanceof Response ? e.statusText : String(e);
-      flash(msg || "Ошибка", "err");
+      flash(getApiErrorMessage(e), "err");
     } finally {
       setSaving(false);
     }
@@ -215,8 +268,7 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
       await loadUser();
       onUpdated();
     } catch (e: unknown) {
-      const msg = e instanceof Response ? e.statusText : String(e);
-      flash(msg || "Ошибка", "err");
+      flash(getApiErrorMessage(e), "err");
     } finally {
       setSaving(false);
     }
@@ -231,8 +283,7 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
       onUpdated();
       setTimeout(onClose, 1000);
     } catch (e: unknown) {
-      const msg = e instanceof Response ? e.statusText : String(e);
-      flash(msg || "Ошибка", "err");
+      flash(getApiErrorMessage(e), "err");
     } finally {
       setSaving(false);
       setDeleteConfirm(false);
@@ -248,8 +299,7 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
       setBadgeId("");
       await loadUser();
     } catch (e: unknown) {
-      const msg = e instanceof Response ? e.statusText : String(e);
-      flash(msg || "Ошибка", "err");
+      flash(getApiErrorMessage(e), "err");
     } finally {
       setSaving(false);
     }
@@ -262,8 +312,7 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
       flash("Бейдж отозван", "ok");
       await loadUser();
     } catch (e: unknown) {
-      const msg = e instanceof Response ? e.statusText : String(e);
-      flash(msg || "Ошибка", "err");
+      flash(getApiErrorMessage(e), "err");
     } finally {
       setSaving(false);
     }
@@ -277,8 +326,27 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
       await loadUser();
       onUpdated();
     } catch (e: unknown) {
-      const msg = e instanceof Response ? e.statusText : String(e);
-      flash(msg || "Ошибка", "err");
+      flash(getApiErrorMessage(e), "err");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleGrantPerkPoints = async () => {
+    if (perkPointsAmount <= 0 || !perkPointsReason.trim()) {
+      flash("Укажите количество очков и причину", "err");
+      return;
+    }
+    setSaving(true);
+    try {
+      const r = await adminGrantPerkPoints(userId, perkPointsAmount, perkPointsReason);
+      flash(`Очки перков: +${r.granted}, доступно ${r.perk_points_available}`, "ok");
+      setPerkPointsAmount(1);
+      setPerkPointsReason("");
+      await loadUser();
+      onUpdated();
+    } catch (e: unknown) {
+      flash(getApiErrorMessage(e), "err");
     } finally {
       setSaving(false);
     }
@@ -427,7 +495,7 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
                         <div className="grid grid-cols-2 gap-3">
                           {user.wallets.map((w) => (
                             <div key={w.id} className="rounded-lg border border-gray-700 bg-gray-700/50 p-3">
-                              <div className="text-lg font-bold text-white">{Number(w.balance).toLocaleString()}</div>
+                              <div className="text-lg font-bold text-white">{w.balance.toLocaleString("ru-RU")}</div>
                               <div className="text-xs text-gray-400">{w.currency}</div>
                             </div>
                           ))}
@@ -443,7 +511,7 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className={labelCls}>Количество (- для снятия)</label>
-                          <input type="number" value={xpAmount} onChange={(e) => setXpAmount(+e.target.value)} className={inputCls} />
+                          <input type="number" value={xpAmount} min={1} onChange={(e) => setXpAmount(+e.target.value)} className={inputCls} />
                         </div>
                         <div>
                           <label className={labelCls}>Причина</label>
@@ -500,7 +568,10 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
                           <div>Class Level: <span className="text-white">{user.class_progress.class_level}</span></div>
                           <div>Class XP: <span className="text-white">{user.class_progress.class_xp}</span></div>
                           <div>Quests: <span className="text-white">{user.class_progress.quests_completed}</span></div>
+                          <div>Perk total: <span className="text-white">{user.class_progress.perk_points_total}</span></div>
+                          <div>Perk available: <span className="text-emerald-300">{user.class_progress.perk_points_available}</span></div>
                           <div>Perks spent: <span className="text-white">{user.class_progress.perk_points_spent}</span></div>
+                          <div>Bonus perk points: <span className="text-purple-300">{user.class_progress.bonus_perk_points}</span></div>
                           <div>Consecutive: <span className="text-white">{user.class_progress.consecutive_quests}</span></div>
                           {user.class_progress.burnout_until && (
                             <div>Burnout until: <span className="text-red-400">{new Date(user.class_progress.burnout_until).toLocaleString()}</span></div>
@@ -530,18 +601,92 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
                       </h3>
                       <div>
                         <label className={labelCls}>Новый класс (пусто = сбросить)</label>
-                        <select value={newClassId} onChange={(e) => setNewClassId(e.target.value)} className={inputCls}>
-                          <option value="">Нет (сброс)</option>
-                          <option value="berserk">Берсерк</option>
-                          <option value="scout">Скаут</option>
-                          <option value="sage">Мудрец</option>
-                          <option value="trader">Торговец</option>
-                        </select>
+                        <div className="max-h-72 space-y-2 overflow-y-auto rounded-lg border border-gray-700 bg-gray-900/40 p-2 pr-1">
+                          <button
+                            type="button"
+                            onClick={() => setNewClassId("")}
+                            className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors ${
+                              newClassId === ""
+                                ? "border-purple-500 bg-purple-500/15 text-white"
+                                : "border-gray-700 bg-gray-700/40 text-gray-300 hover:border-purple-500/40 hover:bg-gray-700/70"
+                            }`}
+                          >
+                            <div>
+                              <div className="text-sm font-medium">Нет (сброс)</div>
+                              <div className="text-xs text-gray-400">Очистить текущий класс пользователя.</div>
+                            </div>
+                            {newClassId === "" && <CheckCircle size={16} className="text-purple-400" />}
+                          </button>
+
+                          {availableClasses.map((cls) => {
+                            const selected = newClassId === cls.class_id;
+
+                            return (
+                              <button
+                                key={cls.class_id}
+                                type="button"
+                                onClick={() => setNewClassId(cls.class_id)}
+                                className={`flex w-full items-start justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
+                                  selected
+                                    ? "bg-purple-500/15 text-white"
+                                    : "border-gray-700 bg-gray-700/40 text-gray-300 hover:border-purple-500/40 hover:bg-gray-700/70"
+                                }`}
+                                style={{ borderColor: selected ? cls.color : undefined }}
+                              >
+                                <div className="flex min-w-0 items-start gap-3">
+                                  <span className="mt-0.5 text-lg leading-none">{cls.icon}</span>
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-medium" style={{ color: selected ? cls.color : undefined }}>
+                                      {cls.name_ru}
+                                    </div>
+                                    <div className="line-clamp-2 text-xs text-gray-400">{cls.description_ru}</div>
+                                    <div className="mt-1 text-[11px] uppercase tracking-wider text-gray-500">{cls.class_id}</div>
+                                  </div>
+                                </div>
+                                {selected && <CheckCircle size={16} className="mt-0.5 shrink-0" style={{ color: cls.color }} />}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                       <button onClick={handleChangeClass} disabled={saving} className={`mt-3 ${btnPrimary}`}>
                         {saving ? <Loader2 size={16} className="animate-spin" /> : <Swords size={16} />}
                         Применить
                       </button>
+                    </div>
+
+                    <div className="rounded-lg border border-gray-700 p-4">
+                      <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-purple-400">
+                        <Award size={16} /> Выдать очки перков
+                      </h3>
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div>
+                          <label className={labelCls}>Количество очков</label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={perkPointsAmount}
+                            onChange={(e) => setPerkPointsAmount(Math.max(1, Number(e.target.value) || 1))}
+                            className={inputCls}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Причина</label>
+                          <input
+                            value={perkPointsReason}
+                            onChange={(e) => setPerkPointsReason(e.target.value)}
+                            placeholder="Награда, компенсация, ручная корректировка..."
+                            className={inputCls}
+                          />
+                        </div>
+                      </div>
+                      <button onClick={handleGrantPerkPoints} disabled={saving || !user.character_class} className={`mt-3 ${btnPrimary}`}>
+                        {saving ? <Loader2 size={16} className="animate-spin" /> : <Award size={16} />}
+                        Выдать очки для ветки перков
+                      </button>
+                      {!user.character_class && (
+                        <p className="mt-2 text-xs text-amber-300">Сначала назначьте пользователю класс.</p>
+                      )}
                     </div>
                   </div>
                 )}

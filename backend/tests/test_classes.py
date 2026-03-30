@@ -1,6 +1,11 @@
 """Tests for the class engine (app.core.classes) — pure functions, no DB."""
 
+from datetime import datetime, timezone
+
 import pytest
+from unittest.mock import AsyncMock, patch
+
+from fastapi.testclient import TestClient
 
 from app.core.classes import (
     BonusType,
@@ -16,6 +21,53 @@ from app.core.classes import (
     get_class_config,
     should_block_quest,
 )
+from app.db.session import get_db_connection
+from app.main import app
+from app.models.user import GradeEnum, UserProfile, UserRoleEnum, UserStats
+
+
+class _AsyncTransaction:
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+def _make_user() -> UserProfile:
+    return UserProfile(
+        id="class_test_user",
+        username="classhero",
+        email="classhero@example.com",
+        role=UserRoleEnum.freelancer,
+        level=6,
+        grade=GradeEnum.novice,
+        xp=250,
+        xp_to_next=300,
+        stats=UserStats(int=10, dex=11, cha=9),
+        badges=[],
+        bio="",
+        skills=[],
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+
+@pytest.fixture
+def client():
+    with (
+        patch("app.main.init_db_pool", new_callable=AsyncMock),
+        patch("app.main.close_db_pool", new_callable=AsyncMock),
+    ):
+        async def _mock_conn_dep():
+            conn = AsyncMock()
+            conn.transaction = lambda: _AsyncTransaction()
+            return conn
+
+        app.dependency_overrides[get_db_connection] = _mock_conn_dep
+        with TestClient(app, raise_server_exceptions=False) as c:
+            yield c
+        app.dependency_overrides.pop(get_db_connection, None)
 
 
 class TestClassRegistry:
@@ -96,3 +148,38 @@ class TestShouldBlockQuest:
 
     def test_berserk_allows_non_portfolio(self):
         assert should_block_quest("berserk", required_portfolio=False) is False
+
+
+class TestAbilityActivationEndpoint:
+    def test_activate_ability_accepts_path_param_route(self, client):
+        from app.api.deps import require_auth
+
+        app.dependency_overrides[require_auth] = lambda: _make_user()
+        try:
+            with patch("app.api.v1.endpoints.classes.class_service.activate_ability", new=AsyncMock(return_value={
+                "message": "ok",
+                "ability": {
+                    "ability_id": "rage_mode",
+                    "name": "Rage Mode",
+                    "name_ru": "Режим ярости",
+                    "description_ru": "desc",
+                    "icon": "💀",
+                    "required_class_level": 5,
+                    "cooldown_hours": 72,
+                    "duration_hours": 4,
+                    "effects": {"xp_all_bonus": 0.5},
+                    "is_unlocked": True,
+                    "is_active": True,
+                    "active_until": None,
+                    "is_on_cooldown": True,
+                    "cooldown_until": None,
+                    "times_used": 1,
+                },
+            })) as activate_mock:
+                response = client.post("/api/v1/classes/abilities/rage_mode/activate")
+
+            assert response.status_code == 200
+            activate_mock.assert_awaited_once()
+            assert activate_mock.await_args.args[2] == "rage_mode"
+        finally:
+            app.dependency_overrides.pop(require_auth, None)

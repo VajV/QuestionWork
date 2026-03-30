@@ -74,7 +74,7 @@ class TestStatGrowthIntegration:
 
         # Simulate reaching Junior (500 XP)
         xp = 550
-        level_up, new_grade, new_level = check_level_up(xp, GradeEnum.novice)
+        level_up, new_grade, new_level, _ = check_level_up(xp, GradeEnum.novice)
 
         assert level_up is True
         assert new_grade == GradeEnum.junior

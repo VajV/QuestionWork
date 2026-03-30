@@ -12,9 +12,9 @@ QuestionWork — IT freelance marketplace with RPG gamification. Full-stack mono
 ```bash
 cd backend
 .venv/Scripts/activate        # activate venv (Windows)
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000   # dev server
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8001   # dev server
 ```
-- Swagger docs: http://localhost:8000/docs
+- Swagger docs: http://localhost:8001/docs
 - Setup script: `backend/scripts/setup.ps1`
 
 ### Frontend
@@ -50,7 +50,7 @@ Currently uses **in-memory mock storage** (dicts in endpoint files). Database (P
 - `components/quests/` — quest marketplace components
 - Tailwind CSS + Framer Motion for styling/animations
 
-**API contract**: Frontend calls `NEXT_PUBLIC_API_URL` (default `http://localhost:8000/api/v1`). Auth uses Bearer JWT tokens in Authorization header.
+**API contract**: Frontend calls `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8001/api/v1`). Auth uses Bearer JWT tokens in Authorization header.
 
 ## Key Patterns
 

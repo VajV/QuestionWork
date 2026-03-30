@@ -111,6 +111,7 @@ class CharacterClassInfo(BaseModel):
 
 class UserClassInfo(BaseModel):
     """User's current class state (returned by GET /classes/me)."""
+    has_class: bool = Field(default=True)
     class_id: str
     name: str
     name_ru: str
@@ -135,6 +136,7 @@ class UserClassInfo(BaseModel):
     perk_points_total: int = Field(default=0)
     perk_points_spent: int = Field(default=0)
     perk_points_available: int = Field(default=0)
+    bonus_perk_points: int = Field(default=0)
     unlocked_perks: List[str] = Field(default_factory=list)
     rage_active: bool = Field(default=False, description="Rage Mode currently active")
     rage_active_until: Optional[datetime] = None

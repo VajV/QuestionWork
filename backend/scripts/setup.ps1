@@ -52,7 +52,7 @@ SECRET_KEY=your-secret-key-change-in-production
 
 # Server
 HOST=127.0.0.1
-PORT=8000
+PORT=8001
 
 # Database (PostgreSQL)
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/questionwork
@@ -147,7 +147,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "app.main:app",
         host=os.getenv("HOST", "127.0.0.1"),
-        port=int(os.getenv("PORT", 8000)),
+        port=int(os.getenv("PORT", 8001)),
         reload=os.getenv("DEBUG", "False") == "True"
     )
 '@
@@ -181,7 +181,7 @@ class Settings(BaseSettings):
     
     # Server
     HOST: str = "127.0.0.1"
-    PORT: int = 8000
+    PORT: int = 8001
     
     # Database
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/questionwork"
@@ -798,12 +798,12 @@ Write-Host "`nАктивация виртуального окружения..."
 & ".\.venv\Scripts\Activate.ps1"
 
 Write-Host "Запуск FastAPI сервера..." -ForegroundColor Yellow
-Write-Host "Swagger UI: http://localhost:8000/docs" -ForegroundColor Green
-Write-Host "ReDoc: http://localhost:8000/redoc" -ForegroundColor Green
+Write-Host "Swagger UI: http://localhost:8001/docs" -ForegroundColor Green
+Write-Host "ReDoc: http://localhost:8001/redoc" -ForegroundColor Green
 Write-Host "`nНажми Ctrl+C для остановки`n" -ForegroundColor Gray
 
 # Запускаем uvicorn
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 '@
 
 $runScriptPath = Join-Path $BACKEND_ROOT "scripts\run.ps1"
@@ -892,7 +892,7 @@ Write-Host "`n📋 Для запуска проекта:" -ForegroundColor Green
 Write-Host "   1. Убедись что PostgreSQL и Redis запущены" -ForegroundColor White
 Write-Host "   2. Перейди в C:\QuestionWork\backend" -ForegroundColor White
 Write-Host "   3. Запусти: .\scripts\run.ps1" -ForegroundColor White
-Write-Host "   4. Открой http://localhost:8000/docs" -ForegroundColor White
+Write-Host "   4. Открой http://localhost:8001/docs" -ForegroundColor White
 
 Write-Host "`n📝 Mock-пользователи для тестирования:" -ForegroundColor Cyan
 Write-Host "   ID: user_123456 (novice_dev) - Lv.1 Novice" -ForegroundColor White

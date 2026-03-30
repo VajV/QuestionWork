@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "@/lib/motion";
 import {
   Wallet,
   Check,
@@ -19,6 +19,8 @@ import {
   adminRejectWithdrawal,
 } from "@/lib/api";
 import type { AdminTransaction, AdminTransactionsResponse } from "@/types";
+import GuildStatusStrip from "@/components/ui/GuildStatusStrip";
+import WorldPanel from "@/components/ui/WorldPanel";
 
 const PAGE_SIZE = 20;
 
@@ -51,6 +53,7 @@ export default function AdminWithdrawalsPage() {
 
   // Batch
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
 
   const load = useCallback(
     async (p: number, t: Tab) => {
@@ -120,31 +123,32 @@ export default function AdminWithdrawalsPage() {
   const handleBatchApprove = async () => {
     if (selected.size === 0) return;
     setActionLoading(true);
-    let ok = 0;
-    let fail = 0;
     const ids = Array.from(selected);
-    for (let i = 0; i < ids.length; i++) {
-      const id = ids[i];
-      try {
-        await adminApproveWithdrawal(id);
-        ok++;
-      } catch {
-        fail++;
-      }
-    }
+    setBatchProgress({ done: 0, total: ids.length });
+    const results = await Promise.allSettled(
+      ids.map(async (id) => {
+        const res = await adminApproveWithdrawal(id);
+        setBatchProgress((prev) => prev ? { ...prev, done: prev.done + 1 } : null);
+        return res;
+      }),
+    );
+    const ok = results.filter((r) => r.status === "fulfilled").length;
+    const fail = results.filter((r) => r.status === "rejected").length;
+    const failedIds = ids.filter((_, i) => results[i].status === "rejected");
     showToast(
       fail === 0 ? "success" : "error",
-      `Пакетное одобрение: ${ok} успешно${fail ? `, ${fail} ошибок` : ""}`,
+      `Пакетное одобрение: ${ok} успешно${fail ? `, ${fail} ошибок (${failedIds.map(id => id.slice(0, 8)).join(", ")})` : ""}`,
     );
     setSelected(new Set());
     setActionLoading(false);
+    setBatchProgress(null);
     load(page, tab);
   };
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
       const s = new Set(prev);
-      s.has(id) ? s.delete(id) : s.add(id);
+      if (s.has(id)) { s.delete(id); } else { s.add(id); }
       return s;
     });
   };
@@ -164,6 +168,7 @@ export default function AdminWithdrawalsPage() {
     : 1;
 
   const txs = data?.transactions ?? [];
+  const pendingCount = txs.filter((tx) => tx.status === "pending").length;
 
   return (
     <div className="space-y-6">
@@ -190,6 +195,31 @@ export default function AdminWithdrawalsPage() {
         )}
       </AnimatePresence>
 
+      <GuildStatusStrip
+        mode="ops"
+        eyebrow="Ops payouts"
+        title="Очередь выводов переведена в отдельный ops-layer с приоритетом риска"
+        description="Сверху виден размер денежной очереди, текущий режим просмотра и объём ручного отбора. Это делает финансовый поток более читаемым до входа в таблицу."
+        stats={[
+          { label: "Total", value: data?.total ?? 0, note: "транзакций в наборе", tone: "ops" },
+          { label: "Pending", value: pendingCount, note: "ожидают решения", tone: pendingCount > 0 ? "amber" : "emerald" },
+          { label: "Selected", value: selected.size, note: "для batch", tone: selected.size > 0 ? "cyan" : "slate" },
+          { label: "Page", value: `${page}/${totalPages}`, note: "позиция", tone: "purple" },
+        ]}
+        signals={[
+          { label: tab === 'pending' ? 'triage queue' : 'full ledger', tone: tab === 'pending' ? 'amber' : 'slate' },
+          { label: actionLoading ? 'ops action running' : 'manual review ready', tone: actionLoading ? 'cyan' : 'emerald' },
+        ]}
+      />
+
+      <WorldPanel
+        eyebrow="Finance control"
+        title="Денежный triage теперь использует тот же panel primitive, что и остальная админка"
+        description="Это снижает визуальный скачок между dashboard и операционными страницами выплат."
+        tone="ops"
+        compact
+      />
+
       {/* Header */}
       <div>
         <h1 className="text-2xl font-cinzel font-bold text-white flex items-center gap-2">
@@ -202,20 +232,21 @@ export default function AdminWithdrawalsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2">
+      <motion.div layout className="flex gap-2">
         {(
           [
             { value: "pending", label: "Ожидающие" },
             { value: "all", label: "Все транзакции" },
           ] as const
         ).map((t) => (
-          <button
+          <motion.button
             key={t.value}
             onClick={() => {
               setTab(t.value);
               setPage(1);
               setSelected(new Set());
             }}
+            whileTap={{ scale: 0.98 }}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               tab === t.value
                 ? "bg-purple-600/30 text-purple-300 border border-purple-500/30"
@@ -223,9 +254,9 @@ export default function AdminWithdrawalsPage() {
             }`}
           >
             {t.label}
-          </button>
+          </motion.button>
         ))}
-      </div>
+      </motion.div>
 
       {/* Batch bar */}
       {tab === "pending" && selected.size > 0 && (
@@ -238,7 +269,7 @@ export default function AdminWithdrawalsPage() {
             disabled={actionLoading}
             className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
           >
-            {actionLoading ? "Обработка..." : "Одобрить выбранные"}
+            {actionLoading && batchProgress ? `${batchProgress.done}/${batchProgress.total}` : actionLoading ? "Обработка..." : "Одобрить выбранные"}
           </button>
           <button
             onClick={() => setSelected(new Set())}
@@ -312,7 +343,7 @@ export default function AdminWithdrawalsPage() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: i * 0.03 }}
-                        className="border-t border-gray-800/50 hover:bg-gray-800/40 transition-colors even:bg-gray-900/30"
+                        className="data-table-row border-t border-gray-800/50 hover:bg-gray-800/40 even:bg-gray-900/30"
                       >
                         {tab === "pending" && (
                           <td className="px-4 py-3">
@@ -334,7 +365,7 @@ export default function AdminWithdrawalsPage() {
                         </td>
                         <td className="px-4 py-3 text-gray-400">{tx.type}</td>
                         <td className="px-4 py-3 text-right font-mono font-bold text-amber-400">
-                          {tx.amount} {tx.currency}
+                          {tx.amount.toLocaleString("ru-RU")} {tx.currency}
                         </td>
                         <td className="px-4 py-3">
                           <span

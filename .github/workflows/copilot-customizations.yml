@@ -1,0 +1,29 @@
+name: Copilot Customizations
+
+on:
+  push:
+    paths:
+      - '.github/**'
+      - '.vscode/mcp.json'
+      - 'scripts/validate_copilot_customizations.py'
+  pull_request:
+    paths:
+      - '.github/**'
+      - '.vscode/mcp.json'
+      - 'scripts/validate_copilot_customizations.py'
+
+jobs:
+  validate-customizations:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate Copilot customizations
+        run: python scripts/validate_copilot_customizations.py

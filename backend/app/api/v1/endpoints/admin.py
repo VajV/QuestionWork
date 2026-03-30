@@ -1,6 +1,14 @@
 """
 Admin HTTP endpoints — protected by require_admin dependency.
 
+SECURITY NOTE: Two guard dependencies exist — choose carefully:
+  - require_admin          → FULL guard: role check + IP allowlist + TOTP verification.
+                             Use for ALL new admin endpoints without exception.
+  - require_admin_role_only → Role-only (no IP/TOTP check).
+                             ONLY for /totp/setup and /totp/enable (chicken-and-egg:
+                             these endpoints configure TOTP, so TOTP can't be checked yet).
+                             Never use require_admin_role_only for any other endpoint.
+
 All mutating endpoints:
   - Operate inside a DB transaction.
   - Write an audit record to admin_logs.
@@ -37,30 +45,52 @@ Routes (God Mode):
 """
 
 import logging
-from typing import Optional, List
+from decimal import Decimal
+from typing import Annotated, Literal, Optional, List
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from pydantic import BaseModel, Field, StringConstraints
 
 from app.api.deps import require_admin, require_admin_role_only
-from app.core.ratelimit import check_rate_limit
+from app.core.classes import ClassId
+from app.core.ratelimit import check_rate_limit, get_client_ip
 from app.db.session import get_db_connection
-from app.models.user import UserProfile
+from app.models.admin import (
+    AdminGuildSeasonRewardConfigResponse,
+    AdminLogsListResponse,
+    AdminPlatformStatsResponse,
+    AdminQuestDetailResponse,
+    AdminTransactionsListResponse,
+    AdminUserDetailResponse,
+    AdminUsersListResponse,
+)
+from app.models.user import GradeEnum, UserProfile
 from app.services import admin_service, notification_service
+from app.services.wallet_service import EscrowMismatchError, InsufficientFundsError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
+
+AdminSkill = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=50, strict=True),
+]
+
+ESCROW_CONFLICT_DETAIL = "Quest payment state is inconsistent. Please contact support."
 
 
 # ─────────────────────────────────────────────────────────────────────
 # Rate-limit helper (applied to every admin route)
 # ─────────────────────────────────────────────────────────────────────
 
-def _admin_rate_limit(request: Request) -> None:
-    ip = request.client.host if request.client else "unknown"
-    check_rate_limit(ip, action="admin", limit=120, window_seconds=60)
+async def _admin_rate_limit(request: Request) -> None:
+    ip = get_client_ip(request)
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", None) or request.url.path or "/admin"
+    action = f"admin:{request.method.upper()}:{route_path}"
+    await check_rate_limit(ip, action=action, limit=120, window_seconds=60)
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -68,9 +98,9 @@ def _admin_rate_limit(request: Request) -> None:
 # ─────────────────────────────────────────────────────────────────────
 
 class AdminUpdateUserRequest(BaseModel):
-    role: Optional[str] = None
+    role: Optional[Literal["client", "freelancer"]] = None
     level: Optional[int] = Field(None, ge=1, le=100)
-    grade: Optional[str] = None
+    grade: Optional[GradeEnum] = None
     xp: Optional[int] = Field(None, ge=0)
     xp_to_next: Optional[int] = Field(None, ge=0)
     stat_points: Optional[int] = Field(None, ge=0)
@@ -78,8 +108,8 @@ class AdminUpdateUserRequest(BaseModel):
     stats_dex: Optional[int] = Field(None, ge=1, le=100)
     stats_cha: Optional[int] = Field(None, ge=1, le=100)
     bio: Optional[str] = Field(None, max_length=500)
-    skills: Optional[list] = None
-    character_class: Optional[str] = None
+    skills: Optional[List[AdminSkill]] = Field(None, max_length=20)
+    character_class: Optional[ClassId] = None
 
 
 class AdminBanUserRequest(BaseModel):
@@ -92,7 +122,7 @@ class AdminGrantXPRequest(BaseModel):
 
 
 class AdminAdjustWalletRequest(BaseModel):
-    amount: float = Field(..., description="Positive = credit, negative = debit")
+    amount: Decimal = Field(..., ge=-10_000_000, le=10_000_000, description="Positive = credit, negative = debit")
     currency: str = Field(default="RUB", max_length=10)
     reason: str = Field(..., min_length=3, max_length=500)
 
@@ -100,10 +130,10 @@ class AdminAdjustWalletRequest(BaseModel):
 class AdminUpdateQuestRequest(BaseModel):
     title: Optional[str] = Field(None, max_length=200)
     description: Optional[str] = None
-    budget: Optional[float] = Field(None, ge=100, le=1_000_000)
+    budget: Optional[Decimal] = Field(None, ge=100, le=1_000_000)
     xp_reward: Optional[int] = Field(None, ge=10, le=500)
-    required_grade: Optional[str] = None
-    status: Optional[str] = None
+    required_grade: Optional[GradeEnum] = None
+    status: Optional[Literal["open", "assigned", "in_progress", "completed", "confirmed", "cancelled", "revision_requested", "draft"]] = None
     assigned_to: Optional[str] = None
     is_urgent: Optional[bool] = None
     required_portfolio: Optional[bool] = None
@@ -111,6 +141,10 @@ class AdminUpdateQuestRequest(BaseModel):
 
 class AdminForceQuestStatusRequest(BaseModel):
     reason: str = Field(..., min_length=3, max_length=500)
+    skip_escrow: bool = Field(
+        default=False,
+        description="Allow force-completion even without an active escrow hold (no payout to freelancer)",
+    )
 
 
 class AdminGrantBadgeRequest(BaseModel):
@@ -121,35 +155,52 @@ class AdminChangeClassRequest(BaseModel):
     class_id: Optional[str] = Field(None, description="Class ID or null to reset")
 
 
+class AdminGrantPerkPointsRequest(BaseModel):
+    amount: int = Field(..., gt=0, description="Bonus perk points to grant")
+    reason: str = Field(..., min_length=3, max_length=500)
+
+
 class AdminBroadcastNotificationRequest(BaseModel):
-    user_ids: List[str] = Field(..., min_length=1)
+    user_ids: List[str] = Field(..., min_length=1, description="At least one user ID is required")
     title: str = Field(..., min_length=1, max_length=200)
     message: str = Field(..., min_length=1, max_length=2000)
     event_type: str = Field(default="admin_broadcast")
+
+
+class AdminGuildSeasonRewardConfigRequest(BaseModel):
+    season_code: str = Field(..., min_length=2, max_length=40)
+    family: str = Field(..., min_length=2, max_length=30)
+    label: str = Field(..., min_length=2, max_length=80)
+    accent: str = Field(..., min_length=2, max_length=20)
+    treasury_bonus: Decimal = Field(...)
+    guild_tokens_bonus: int = Field(default=0, ge=0)
+    badge_name: str = Field(..., min_length=2, max_length=80)
+    is_active: bool = True
 
 
 # ─────────────────────────────────────────────────────────────────────
 # Users
 # ─────────────────────────────────────────────────────────────────────
 
-@router.get("/users", summary="List all users (admin)")
+@router.get("/users", summary="List all users (admin)", response_model=AdminUsersListResponse)
 async def admin_list_users(
     request: Request,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
     role: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(default=None, max_length=100),
     _admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    return await admin_service.list_users(conn, page=page, page_size=page_size, role_filter=role)
+    await _admin_rate_limit(request)
+    return await admin_service.list_users(conn, page=page, page_size=page_size, role_filter=role, search=search)
 
 
 # ─────────────────────────────────────────────────────────────────────
 # Transactions
 # ─────────────────────────────────────────────────────────────────────
 
-@router.get("/transactions", summary="List transactions (admin)")
+@router.get("/transactions", summary="List transactions (admin)", response_model=AdminTransactionsListResponse)
 async def admin_list_transactions(
     request: Request,
     page: int = Query(default=1, ge=1),
@@ -160,7 +211,7 @@ async def admin_list_transactions(
     _admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
+    await _admin_rate_limit(request)
     return await admin_service.list_transactions(
         conn,
         page=page,
@@ -179,7 +230,7 @@ async def admin_pending_withdrawals(
     _admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
+    await _admin_rate_limit(request)
     return await admin_service.list_pending_withdrawals(conn, page=page, page_size=page_size)
 
 
@@ -194,8 +245,8 @@ async def admin_approve_withdrawal(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    ip = request.client.host if request.client else None
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
 
     try:
         async with conn.transaction():
@@ -234,8 +285,8 @@ async def admin_reject_withdrawal(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    ip = request.client.host if request.client else None
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
 
     try:
         async with conn.transaction():
@@ -268,7 +319,7 @@ async def admin_reject_withdrawal(
 # Audit log
 # ─────────────────────────────────────────────────────────────────────
 
-@router.get("/logs", summary="Admin audit log")
+@router.get("/logs", summary="Admin audit log", response_model=AdminLogsListResponse)
 async def admin_get_logs(
     request: Request,
     page: int = Query(default=1, ge=1),
@@ -277,7 +328,7 @@ async def admin_get_logs(
     _admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
+    await _admin_rate_limit(request)
     return await admin_service.get_admin_logs(
         conn, page=page, page_size=page_size, admin_id_filter=admin_id
     )
@@ -294,26 +345,49 @@ class VerifyTotpRequest(BaseModel):
 
 @router.post(
     "/auth/totp/setup",
-    summary="Generate and store a TOTP secret for the calling admin",
+    summary="Generate a pending TOTP secret for the calling admin",
 )
 async def admin_totp_setup(
     request: Request,
     current_admin: UserProfile = Depends(require_admin_role_only),
     conn: asyncpg.Connection = Depends(get_db_connection),
+    x_totp_token: Optional[str] = Header(None, alias="X-TOTP-Token"),
 ):
     """
-    Generates a new TOTP secret for the calling admin user.
+    Generates a new TOTP secret and stores it as *pending*.
 
-    Returns the raw secret and an ``otpauth://`` URI that can be rendered
-    as a QR code by any authenticator app (Google Authenticator, Authy, etc.).
+    If the admin already has an active TOTP secret, a valid current TOTP
+    code must be provided in the ``X-TOTP-Token`` header to authorise
+    rotation.  First-time setup does not require TOTP.
 
-    Calling this endpoint multiple times is safe — it replaces the existing secret.
-    The new secret is **not active** yet: confirm it with POST /admin/auth/totp/enable.
+    The pending secret is **not active** until confirmed via
+    POST /admin/auth/totp/enable.
     """
+    ip = get_client_ip(request)
+    await check_rate_limit(ip, action="admin_totp_setup", limit=5, window_seconds=60)
     try:
         import pyotp
     except ImportError:
         raise HTTPException(status_code=500, detail="pyotp package not installed")
+
+    from app.core.security import encrypt_totp_secret, decrypt_totp_secret
+
+    # If admin already has an active TOTP, require current code for rotation
+    existing_secret_enc = await conn.fetchval(
+        "SELECT totp_secret FROM users WHERE id = $1", current_admin.id
+    )
+    if existing_secret_enc:
+        if not x_totp_token:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Current X-TOTP-Token header required to rotate an existing TOTP secret",
+            )
+        existing_secret = decrypt_totp_secret(existing_secret_enc)
+        if not pyotp.TOTP(existing_secret).verify(x_totp_token, valid_window=0):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid current TOTP token — cannot rotate secret",
+            )
 
     secret = pyotp.random_base32()
     totp = pyotp.TOTP(secret)
@@ -322,56 +396,86 @@ async def admin_totp_setup(
         issuer_name="QuestionWork Admin",
     )
 
-    from app.core.security import encrypt_totp_secret
     encrypted = encrypt_totp_secret(secret)
 
-    await conn.execute(
-        "UPDATE users SET totp_secret = $1 WHERE id = $2",
-        encrypted,
-        current_admin.id,
-    )
-    logger.info(f"Admin {current_admin.id} generated new TOTP secret")
+    async with conn.transaction():
+        await conn.execute(
+            "UPDATE users SET pending_totp_secret = $1 WHERE id = $2",
+            encrypted,
+            current_admin.id,
+        )
+        action = "totp_rotation_started" if existing_secret_enc else "totp_setup_started"
+        await admin_service.log_admin_action(
+            conn,
+            admin_id=current_admin.id,
+            action=action,
+            target_type="user",
+            target_id=current_admin.id,
+            ip_address=ip,
+        )
+    logger.info(f"Admin {current_admin.id} generated pending TOTP secret")
 
     return {"secret": secret, "otpauth_uri": uri}
 
 
 @router.post(
     "/auth/totp/enable",
-    summary="Verify TOTP token to confirm setup is working",
+    summary="Activate the pending TOTP secret after verifying a valid token",
 )
 async def admin_totp_enable(
     body: VerifyTotpRequest,
+    request: Request,
     current_admin: UserProfile = Depends(require_admin_role_only),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """
     Verifies that the caller's authenticator app produces correct tokens for
-    the secret stored after /setup. Returns 200 if the token is valid.
-
-    This is a smoke-test step before enabling ``ADMIN_TOTP_REQUIRED=True``.
+    the *pending* secret created by /setup, then promotes it to the active
+    secret.  This is the only path that activates a TOTP secret.
     """
+    ip = get_client_ip(request)
+    await check_rate_limit(ip, action="admin_totp_enable", limit=5, window_seconds=60)
     try:
         import pyotp
     except ImportError:
         raise HTTPException(status_code=500, detail="pyotp package not installed")
 
-    totp_secret = await conn.fetchval(
-        "SELECT totp_secret FROM users WHERE id = $1", current_admin.id
+    pending_secret_encrypted = await conn.fetchval(
+        "SELECT pending_totp_secret FROM users WHERE id = $1", current_admin.id
     )
-    if not totp_secret:
+    if not pending_secret_encrypted:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="TOTP not set up. Call POST /admin/auth/totp/setup first.",
+            detail="No pending TOTP secret. Call POST /admin/auth/totp/setup first.",
         )
 
-    totp = pyotp.TOTP(totp_secret)
-    if not totp.verify(body.token, valid_window=1):
+    from app.core.security import decrypt_totp_secret
+    pending_secret = decrypt_totp_secret(pending_secret_encrypted)
+    totp = pyotp.TOTP(pending_secret)
+    if not totp.verify(body.token, valid_window=0):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid TOTP token",
         )
 
-    return {"ok": True, "message": "TOTP token is valid. You can now enable ADMIN_TOTP_REQUIRED=True."}
+    # Promote pending → active and clear the pending slot
+    async with conn.transaction():
+        await conn.execute(
+            "UPDATE users SET totp_secret = $1, pending_totp_secret = NULL WHERE id = $2",
+            pending_secret_encrypted,
+            current_admin.id,
+        )
+        await admin_service.log_admin_action(
+            conn,
+            admin_id=current_admin.id,
+            action="totp_enabled",
+            target_type="user",
+            target_id=current_admin.id,
+            ip_address=get_client_ip(request),
+        )
+    logger.info(f"Admin {current_admin.id} activated TOTP")
+
+    return {"ok": True, "message": "TOTP activated. You can now enable ADMIN_TOTP_REQUIRED=True."}
 
 
 @router.delete(
@@ -379,13 +483,27 @@ async def admin_totp_enable(
     summary="Disable TOTP for the calling admin",
 )
 async def admin_totp_disable(
-    current_admin: UserProfile = Depends(require_admin_role_only),
+    request: Request,
+    current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    """Clears the TOTP secret. If ADMIN_TOTP_REQUIRED is True this will lock out the admin."""
-    await conn.execute(
-        "UPDATE users SET totp_secret = NULL WHERE id = $1", current_admin.id
+    await check_rate_limit(
+        get_client_ip(request), action="admin_totp_disable", limit=3, window_seconds=60
     )
+    """Clears both the active and pending TOTP secrets. Requires full admin auth."""
+    async with conn.transaction():
+        await conn.execute(
+            "UPDATE users SET totp_secret = NULL, pending_totp_secret = NULL WHERE id = $1",
+            current_admin.id,
+        )
+        await admin_service.log_admin_action(
+            conn,
+            admin_id=current_admin.id,
+            action="totp_disable",
+            target_type="user",
+            target_id=current_admin.id,
+            ip_address=get_client_ip(request),
+        )
     logger.warning(f"Admin {current_admin.id} disabled TOTP")
     return {"ok": True, "message": "TOTP disabled for this account."}
 
@@ -403,7 +521,7 @@ async def admin_cleanup_notifications(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
+    await _admin_rate_limit(request)
     deleted = await admin_service.cleanup_old_notifications(conn)
     logger.info(
         f"Notification cleanup triggered by admin {current_admin.id}: {deleted} rows deleted"
@@ -423,13 +541,13 @@ async def admin_cleanup_notifications(
 # Platform stats
 # ─────────────────────────────────────────────────────────────────────
 
-@router.get("/stats", summary="Platform-wide statistics")
+@router.get("/stats", response_model=AdminPlatformStatsResponse, summary="Platform-wide statistics")
 async def admin_platform_stats(
     request: Request,
     _admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
+    await _admin_rate_limit(request)
     return await admin_service.get_platform_stats(conn)
 
 
@@ -437,14 +555,14 @@ async def admin_platform_stats(
 # User detail / edit / ban / delete / XP / wallet / badge / class
 # ─────────────────────────────────────────────────────────────────────
 
-@router.get("/users/{user_id}", summary="Full user detail (admin)")
+@router.get("/users/{user_id}", response_model=AdminUserDetailResponse, summary="Full user detail (admin)")
 async def admin_get_user_detail(
     user_id: str,
     request: Request,
     _admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
+    await _admin_rate_limit(request)
     try:
         return await admin_service.get_user_detail(conn, user_id)
     except ValueError as exc:
@@ -459,8 +577,8 @@ async def admin_update_user(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    ip = request.client.host if request.client else None
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
     if not fields:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
@@ -479,8 +597,8 @@ async def admin_ban_user(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    ip = request.client.host if request.client else None
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
     try:
         async with conn.transaction():
             return await admin_service.ban_user(conn, user_id, body.reason, current_admin.id, ip)
@@ -495,8 +613,8 @@ async def admin_unban_user(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    ip = request.client.host if request.client else None
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
     try:
         async with conn.transaction():
             return await admin_service.unban_user(conn, user_id, current_admin.id, ip)
@@ -511,8 +629,8 @@ async def admin_delete_user(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    ip = request.client.host if request.client else None
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
     try:
         async with conn.transaction():
             return await admin_service.delete_user(conn, user_id, current_admin.id, ip)
@@ -528,8 +646,8 @@ async def admin_grant_xp(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    ip = request.client.host if request.client else None
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
     try:
         async with conn.transaction():
             return await admin_service.grant_xp(conn, user_id, body.amount, body.reason, current_admin.id, ip)
@@ -545,14 +663,14 @@ async def admin_adjust_wallet(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    ip = request.client.host if request.client else None
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
     try:
         async with conn.transaction():
             return await admin_service.adjust_wallet(
                 conn, user_id, body.amount, body.currency, body.reason, current_admin.id, ip
             )
-    except Exception as exc:
+    except (ValueError, InsufficientFundsError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
@@ -564,8 +682,8 @@ async def admin_grant_badge(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    ip = request.client.host if request.client else None
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
     try:
         async with conn.transaction():
             return await admin_service.grant_badge(conn, user_id, body.badge_id, current_admin.id, ip)
@@ -581,8 +699,8 @@ async def admin_revoke_badge(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    ip = request.client.host if request.client else None
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
     try:
         async with conn.transaction():
             return await admin_service.revoke_badge(conn, user_id, badge_id, current_admin.id, ip)
@@ -598,8 +716,8 @@ async def admin_change_class(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    ip = request.client.host if request.client else None
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
     try:
         async with conn.transaction():
             return await admin_service.change_user_class(conn, user_id, body.class_id, current_admin.id, ip)
@@ -607,18 +725,60 @@ async def admin_change_class(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
+@router.post("/users/{user_id}/grant-perk-points", summary="Grant bonus perk points for class tree")
+async def admin_grant_perk_points(
+    user_id: str,
+    body: AdminGrantPerkPointsRequest,
+    request: Request,
+    current_admin: UserProfile = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_db_connection),
+):
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
+    try:
+        async with conn.transaction():
+            return await admin_service.grant_class_perk_points(
+                conn,
+                user_id,
+                body.amount,
+                body.reason,
+                current_admin.id,
+                ip,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Quest listing (admin) — P2-07
+# ─────────────────────────────────────────────────────────────────────
+
+@router.get("/quests", summary="List quests (admin)")
+async def admin_list_quests(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    quest_status: Optional[str] = Query(default=None, alias="status"),
+    search: Optional[str] = Query(default=None, max_length=200),
+    _admin: UserProfile = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_db_connection),
+):
+    await _admin_rate_limit(request)
+    return await admin_service.list_quests(conn, page=page, page_size=page_size, status_filter=quest_status, search=search)
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Quest detail / edit / force-cancel / force-complete / delete
 # ─────────────────────────────────────────────────────────────────────
 
-@router.get("/quests/{quest_id}", summary="Full quest detail (admin)")
+@router.get("/quests/{quest_id}", response_model=AdminQuestDetailResponse, summary="Full quest detail (admin)")
 async def admin_get_quest_detail(
     quest_id: str,
     request: Request,
     _admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
+    await _admin_rate_limit(request)
     try:
         return await admin_service.get_quest_detail(conn, quest_id)
     except ValueError as exc:
@@ -633,8 +793,8 @@ async def admin_update_quest(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    ip = request.client.host if request.client else None
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
     if not fields:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
@@ -653,8 +813,8 @@ async def admin_force_cancel_quest(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    ip = request.client.host if request.client else None
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
     try:
         async with conn.transaction():
             return await admin_service.force_cancel_quest(conn, quest_id, body.reason, current_admin.id, ip)
@@ -670,11 +830,13 @@ async def admin_force_complete_quest(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    ip = request.client.host if request.client else None
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
     try:
         async with conn.transaction():
-            return await admin_service.force_complete_quest(conn, quest_id, body.reason, current_admin.id, ip)
+            return await admin_service.force_complete_quest(conn, quest_id, body.reason, current_admin.id, ip, skip_escrow=body.skip_escrow)
+    except EscrowMismatchError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=ESCROW_CONFLICT_DETAIL)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
@@ -686,8 +848,8 @@ async def admin_delete_quest(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    ip = request.client.host if request.client else None
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
     try:
         async with conn.transaction():
             return await admin_service.delete_quest(conn, quest_id, current_admin.id, ip)
@@ -706,13 +868,38 @@ async def admin_broadcast_notification(
     current_admin: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
-    _admin_rate_limit(request)
-    ip = request.client.host if request.client else None
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
     try:
         async with conn.transaction():
             return await admin_service.broadcast_notification(
                 conn, body.user_ids, body.title, body.message, body.event_type,
                 current_admin.id, ip,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post(
+    "/guild-season-rewards",
+    response_model=AdminGuildSeasonRewardConfigResponse,
+    summary="Create or update guild seasonal reward config",
+)
+async def admin_upsert_guild_season_reward_config(
+    body: AdminGuildSeasonRewardConfigRequest,
+    request: Request,
+    current_admin: UserProfile = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_db_connection),
+):
+    await _admin_rate_limit(request)
+    ip = get_client_ip(request)
+    try:
+        async with conn.transaction():
+            return await admin_service.upsert_guild_season_reward_config(
+                conn,
+                body.model_dump(),
+                current_admin.id,
+                ip,
             )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

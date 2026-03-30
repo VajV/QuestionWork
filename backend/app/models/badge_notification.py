@@ -56,3 +56,4 @@ class NotificationListResponse(BaseModel):
     notifications: List[Notification]
     total: int
     unread_count: int
+    next_cursor: Optional[str] = None

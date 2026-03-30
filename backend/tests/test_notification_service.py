@@ -91,7 +91,7 @@ class TestGetNotifications:
     async def test_returns_notifications_for_user(self):
         conn = _make_conn(in_txn=False)
         row = _notif_row()
-        conn.fetchval.side_effect = [1, 1]   # count, unread_count
+        conn.fetchrow = AsyncMock(return_value={"total": 1, "unread_count": 1})
         conn.fetch = AsyncMock(return_value=[row])
 
         result = await get_notifications(conn, "user1")
@@ -104,7 +104,7 @@ class TestGetNotifications:
     @pytest.mark.asyncio
     async def test_unread_only_filter(self):
         conn = _make_conn(in_txn=False)
-        conn.fetchval.side_effect = [1, 1]
+        conn.fetchrow = AsyncMock(return_value={"total": 1})
         conn.fetch = AsyncMock(return_value=[_notif_row()])
 
         result = await get_notifications(conn, "user1", unread_only=True)
@@ -116,7 +116,7 @@ class TestGetNotifications:
     @pytest.mark.asyncio
     async def test_empty_result(self):
         conn = _make_conn(in_txn=False)
-        conn.fetchval.side_effect = [0, 0]
+        conn.fetchrow = AsyncMock(return_value={"total": 0, "unread_count": 0})
         conn.fetch = AsyncMock(return_value=[])
 
         result = await get_notifications(conn, "user_empty")

@@ -14,7 +14,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from pydantic import BaseModel, Field
 
 from app.api.deps import require_auth
-from app.core.ratelimit import check_rate_limit
+from app.core.ratelimit import check_rate_limit, get_client_ip
 from app.db.session import get_db_connection
 from app.models.user import UserProfile
 from app.services import email_service, review_service
@@ -67,8 +67,8 @@ async def create_review(
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Create a review for a confirmed quest."""
-    ip = request.client.host if request.client else "unknown"
-    check_rate_limit(ip, action="create_review", limit=10, window_seconds=60)
+    ip = get_client_ip(request)
+    await check_rate_limit(ip, action="create_review", limit=10, window_seconds=60)
     try:
         async with conn.transaction():
             result = await review_service.create_review(
@@ -104,11 +104,13 @@ async def create_review(
 @router.get("/user/{user_id}", response_model=UserReviewsResponse)
 async def get_user_reviews(
     user_id: str,
+    request: Request,
     limit: int = Query(default=20, le=100),
     offset: int = Query(default=0, ge=0),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Get all reviews received by a user (public, no auth required)."""
+    await check_rate_limit(get_client_ip(request), action="get_user_reviews", limit=60, window_seconds=60)
     data = await review_service.get_reviews_for_user(
         conn, user_id, limit=limit, offset=offset
     )

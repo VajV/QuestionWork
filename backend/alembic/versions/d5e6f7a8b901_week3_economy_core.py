@@ -45,28 +45,31 @@ def upgrade() -> None:
     # ── platform virtual user + wallet ───────────────────────────────────
     platform_id = settings.PLATFORM_USER_ID  # 'platform' by default
 
-    op.execute(f"""
+    op.execute(
+        sa.text("""
     INSERT INTO users (
         id, username, email, password_hash, role, level, grade, xp, xp_to_next,
         stats_int, stats_dex, stats_cha, stat_points, badges, bio, skills,
         created_at, updated_at
     )
     VALUES (
-        '{platform_id}', 'platform', NULL,
-        '$2b$12$XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+        :platform_id, 'platform', NULL,
+        '!disabled',
         'client', 1, 'novice', 0, 100, 10, 10, 10, 0,
         '[]', 'Platform virtual account', '[]',
         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
     )
     ON CONFLICT (id) DO NOTHING;
-    """)
+    """).bindparams(platform_id=platform_id)
+    )
 
     # Create a RUB wallet for the platform
-    op.execute(f"""
+    op.execute(
+        sa.text("""
     INSERT INTO wallets (id, user_id, currency, balance, version, created_at, updated_at)
     VALUES (
         'wallet_platform_rub',
-        '{platform_id}',
+        :platform_id,
         'RUB',
         0,
         1,
@@ -74,12 +77,17 @@ def upgrade() -> None:
         CURRENT_TIMESTAMP
     )
     ON CONFLICT (user_id, currency) DO NOTHING;
-    """)
+    """).bindparams(platform_id=platform_id)
+    )
 
 
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS idx_transactions_status;")
     op.execute("ALTER TABLE transactions DROP COLUMN IF EXISTS status;")
     op.execute("ALTER TABLE users DROP COLUMN IF EXISTS stat_points;")
-    op.execute(f"DELETE FROM wallets WHERE user_id = '{settings.PLATFORM_USER_ID}';")
-    op.execute(f"DELETE FROM users WHERE id = '{settings.PLATFORM_USER_ID}';")
+    op.execute(
+        sa.text("DELETE FROM wallets WHERE user_id = :pid").bindparams(pid=settings.PLATFORM_USER_ID)
+    )
+    op.execute(
+        sa.text("DELETE FROM users WHERE id = :pid").bindparams(pid=settings.PLATFORM_USER_ID)
+    )

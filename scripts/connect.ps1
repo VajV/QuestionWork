@@ -32,7 +32,7 @@ if ($pgTest) {
 Write-Host "`nЗапуск сервисов..." -ForegroundColor Yellow
 
 # Запуск Backend (в фоне)
-Write-Host "  Запуск Backend (FastAPI :8000)..." -ForegroundColor Gray
+Write-Host "  Запуск Backend (FastAPI :8001)..." -ForegroundColor Gray
 Set-Location $BACKEND_DIR
 
 # Проверяем наличие venv
@@ -45,7 +45,7 @@ if (-not (Test-Path ".venv")) {
 # Активируем venv и запускаем backend
 $backendScript = @"
 & ".\.venv\Scripts\Activate.ps1"
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 "@
 
 $backendProcess = Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", $backendScript `
@@ -79,9 +79,9 @@ Write-Host "========================================" -ForegroundColor Cyan
 
 Write-Host "`n📋 Полезные ссылки:" -ForegroundColor Cyan
 Write-Host "   Frontend: http://localhost:3000" -ForegroundColor White
-Write-Host "   Backend API: http://localhost:8000" -ForegroundColor White
-Write-Host "   Swagger UI: http://localhost:8000/docs" -ForegroundColor White
-Write-Host "   ReDoc: http://localhost:8000/redoc" -ForegroundColor White
+Write-Host "   Backend API: http://localhost:8001" -ForegroundColor White
+Write-Host "   Swagger UI: http://localhost:8001/docs" -ForegroundColor White
+Write-Host "   ReDoc: http://localhost:8001/redoc" -ForegroundColor White
 
 Write-Host "`n⏹️  Для остановки:" -ForegroundColor Yellow
 Write-Host "   1. Закройте окна PowerShell с серверами" -ForegroundColor White

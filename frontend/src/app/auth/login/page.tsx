@@ -4,7 +4,7 @@
 
 "use client";
 
-import { useState, FormEvent, useEffect } from "react";
+import { useState, FormEvent, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
@@ -13,7 +13,9 @@ import Button from "@/components/ui/Button";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login, isAuthenticated } = useAuth();
+  const { login, isAuthenticated, user } = useAuth();
+  const usernameInputRef = useRef<HTMLInputElement>(null);
+  const passwordInputRef = useRef<HTMLInputElement>(null);
   
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -32,9 +34,9 @@ export default function LoginPage() {
   // Редирект если уже авторизован
   useEffect(() => {
     if (isAuthenticated) {
-      router.push("/profile");
+      router.push(user?.role === "admin" ? "/admin" : "/profile");
     }
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, router, user?.role]);
 
   if (isAuthenticated) {
     return null;
@@ -53,9 +55,7 @@ export default function LoginPage() {
 
     const result = await login({ username: username.trim(), password });
 
-    if (result.success) {
-      router.push("/profile");
-    } else {
+    if (!result.success) {
       setError(result.error || "Не удалось войти");
     }
 
@@ -103,13 +103,17 @@ export default function LoginPage() {
               Имя Героя
             </label>
             <input
+              ref={usernameInputRef}
               type="text"
               id="username"
+              name="login_username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="w-full px-4 py-3 bg-black/40 border border-purple-900/50 rounded focus:outline-none focus:border-amber-500/50 focus:bg-purple-950/20 text-gray-200 placeholder-gray-600 font-mono transition-all shadow-inner"
               placeholder="novice_dev"
               autoComplete="username"
+              spellCheck={false}
+              required
               disabled={loading}
             />
           </div>
@@ -119,13 +123,16 @@ export default function LoginPage() {
               Секретный Код
             </label>
             <input
+              ref={passwordInputRef}
               type="password"
               id="password"
+              name="login_password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-4 py-3 bg-black/40 border border-purple-900/50 rounded focus:outline-none focus:border-amber-500/50 focus:bg-purple-950/20 text-gray-200 placeholder-gray-600 font-mono transition-all shadow-inner"
               placeholder="••••••••"
               autoComplete="current-password"
+              required
               disabled={loading}
             />
           </div>
@@ -156,16 +163,6 @@ export default function LoginPage() {
             Пройти Инициацию
           </Link>
         </div>
-
-        {process.env.NODE_ENV === "development" && (
-          <div className="mt-8 p-4 bg-gray-900/50 rounded border border-gray-800 border-dashed">
-            <p className="text-xs font-cinzel text-gray-500 mb-2 uppercase">📝 Магические шпаргалки (Dev):</p>
-            <div className="text-xs text-gray-400 space-y-1 font-mono">
-              <div>Username: <span className="text-purple-400">novice_dev</span></div>
-              <div>Password: <span className="text-purple-400">password123</span></div>
-            </div>
-          </div>
-        )}
       </Card>
     </main>
   );

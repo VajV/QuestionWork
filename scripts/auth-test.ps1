@@ -5,7 +5,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  QuestionWork - Auth Flow Test" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
-$API_URL = "http://localhost:8000/api/v1"
+$API_URL = "http://localhost:8001/api/v1"
 $TIMESTAMP = Get-Date -Format "yyyyMMdd_HHmmss"
 
 # Test credentials
@@ -22,7 +22,7 @@ Write-Host "   Password: $TEST_PASSWORD" -ForegroundColor White
 Write-Host "`n[Test 1/5] Checking API availability..." -ForegroundColor Cyan
 
 try {
-    $healthResponse = Invoke-RestMethod -Uri "http://localhost:8000/health" -Method Get -ErrorAction Stop
+    $healthResponse = Invoke-RestMethod -Uri "http://localhost:8001/health" -Method Get -ErrorAction Stop
     Write-Host "  OK: API is running" -ForegroundColor Green
 } catch {
     Write-Host "  FAIL: API is not available!" -ForegroundColor Red

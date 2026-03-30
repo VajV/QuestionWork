@@ -5,7 +5,7 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  QuestionWork - Complete Quest Flow Test" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 
-$API_URL = "http://localhost:8000/api/v1"
+$API_URL = "http://localhost:8001/api/v1"
 $script:HasFailed = $false
 
 function Write-StepResult {

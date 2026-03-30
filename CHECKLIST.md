@@ -6,9 +6,9 @@
 ```powershell
 cd C:\QuestionWork\backend
 .venv\Scripts\activate
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 ```
-Проверка: http://localhost:8000/health → должен вернуть `{"status":"ok"}`
+Проверка: http://localhost:8001/health → должен вернуть `{"status":"ok"}`
 
 ### 2. Frontend (Next.js)
 ```powershell
@@ -31,8 +31,8 @@ cd C:\QuestionWork
 - [ ] Python venv активирован (`.venv\Scripts\activate`)
 - [ ] Файл `backend\.env` существует
 - [ ] Зависимости установлены: `pip install -r requirements.txt`
-- [ ] Порт 8000 свободен (`netstat -ano | findstr :8000`)
-- [ ] Backend запущен: `curl http://localhost:8000/health`
+- [ ] Порт 8001 свободен (`netstat -ano | findstr :8001`)
+- [ ] Backend запущен: `curl http://localhost:8001/health`
 
 ### Frontend
 - [ ] `node_modules` установлены: `npm install`
@@ -50,21 +50,21 @@ cd C:\QuestionWork
 
 ### 1. Регистрация фрилансера
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:8000/api/v1/auth/register" `
+Invoke-RestMethod -Uri "http://localhost:8001/api/v1/auth/register" `
   -Method POST -ContentType "application/json" `
   -Body '{"username":"test_dev","email":"dev@test.com","password":"Test1234!","role":"freelancer"}'
 ```
 
 ### 2. Регистрация клиента
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:8000/api/v1/auth/register" `
+Invoke-RestMethod -Uri "http://localhost:8001/api/v1/auth/register" `
   -Method POST -ContentType "application/json" `
   -Body '{"username":"test_client","email":"client@test.com","password":"Test1234!","role":"client"}'
 ```
 
 ### 3. Логин (получить токен)
 ```powershell
-$resp = Invoke-RestMethod -Uri "http://localhost:8000/api/v1/auth/login" `
+$resp = Invoke-RestMethod -Uri "http://localhost:8001/api/v1/auth/login" `
   -Method POST -ContentType "application/json" `
   -Body '{"username":"test_client","password":"Test1234!"}'
 $TOKEN = $resp.access_token
@@ -73,14 +73,14 @@ $TOKEN = $resp.access_token
 ### 4. Создать квест
 ```powershell
 $headers = @{ Authorization = "Bearer $TOKEN" }
-Invoke-RestMethod -Uri "http://localhost:8000/api/v1/quests/" `
+Invoke-RestMethod -Uri "http://localhost:8001/api/v1/quests/" `
   -Method POST -ContentType "application/json" -Headers $headers `
   -Body '{"title":"Тестовый квест","description":"Описание тестового задания длиннее 20 символов","budget":10000,"skills":["Python"]}'
 ```
 
 ### 5. Получить список квестов
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:8000/api/v1/quests/?page=1"
+Invoke-RestMethod -Uri "http://localhost:8001/api/v1/quests/?page=1"
 ```
 
 ### 6. Запустить полный тест
@@ -96,7 +96,7 @@ Invoke-RestMethod -Uri "http://localhost:8000/api/v1/quests/?page=1"
 
 ### 0) Подготовка
 - [ ] Docker Desktop запущен
-- [ ] Backend поднят: `cd backend; .venv\Scripts\activate; uvicorn app.main:app --reload --host 127.0.0.1 --port 8000`
+- [ ] Backend поднят: `cd backend; .venv\Scripts\activate; uvicorn app.main:app --reload --host 127.0.0.1 --port 8001`
 - [ ] Frontend поднят: `cd frontend; npm run dev`
 - [ ] БД мигрирована: `cd backend; alembic upgrade head`
 
@@ -115,7 +115,7 @@ Invoke-RestMethod -Uri "http://localhost:8000/api/v1/quests/?page=1"
 ### 3) Frontend smoke
 - [ ] Открываются страницы: `/`, `/auth/login`, `/auth/register`, `/quests`, `/marketplace`, `/profile`
 - [ ] В DevTools нет критичных runtime ошибок (Uncaught/React hydration)
-- [ ] Запросы уходят на `http://localhost:8000/api/v1`
+- [ ] Запросы уходят на `http://localhost:8001/api/v1`
 
 ### 4) Regression scripts
 - [ ] `./scripts/check-status.ps1` -> понятный вывод `✅/❌`, корректный код возврата
@@ -170,18 +170,18 @@ Smoke считается успешным, если одновременно:
 cd backend; pytest --no-cov -q          # 24 passed
 
 # Проверка CORS PATCH
-curl -X OPTIONS http://localhost:8000/api/v1/quests/ `
+curl -X OPTIONS http://localhost:8001/api/v1/quests/ `
      -H "Origin: http://localhost:3000" `
      -H "Access-Control-Request-Method: PATCH" -v
 
 # Валидация — should return 422
-curl -s http://localhost:8000/api/v1/quests/ -X POST `
+curl -s http://localhost:8001/api/v1/quests/ -X POST `
      -H "Authorization: Bearer test" `
      -d '{"title":"t","description":"x","budget":50,"currency":"JPY"}' `
      -H "Content-Type: application/json"
 
 # Auth guard — should return 401
-curl -s http://localhost:8000/api/v1/users/
+curl -s http://localhost:8001/api/v1/users/
 
 # Role guard — login as novice_dev (freelancer) and try to create quest -> 403
 ```
@@ -245,10 +245,10 @@ cd C:\QuestionWork\backend
 pip install -r requirements.txt
 ```
 
-**Ошибка:** `Address already in use` (порт 8000 занят)
+**Ошибка:** `Address already in use` (порт 8001 занят)
 ```powershell
 # Найти и убить процесс
-netstat -ano | findstr :8000
+netstat -ano | findstr :8001
 taskkill /PID <PID_из_вывода> /F
 ```
 
@@ -279,7 +279,7 @@ npm run build
 **Ошибка:** `NEXT_PUBLIC_API_URL is not defined`
 ```powershell
 # Создать файл .env.local
-echo "NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1" > .env.local
+echo "NEXT_PUBLIC_API_URL=http://localhost:8001/api/v1" > .env.local
 ```
 
 ---
@@ -333,7 +333,7 @@ FRONTEND_URL=http://localhost:3000
 Ручная проверка:
 ```powershell
 # Backend
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 
 # Frontend
 curl -o /dev/null -w "%{http_code}" http://localhost:3000
@@ -342,7 +342,7 @@ curl -o /dev/null -w "%{http_code}" http://localhost:3000
 docker ps | grep questionwork-redis
 
 # Swagger
-Start-Process "http://localhost:8000/docs"
+Start-Process "http://localhost:8001/docs"
 ```
 
 ---

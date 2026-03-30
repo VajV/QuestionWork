@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "@/lib/motion";
 import type { PerkInfo, PerkTreeResponse } from "@/lib/api";
-import { unlockPerk } from "@/lib/api";
+import { getApiErrorMessage, unlockPerk } from "@/lib/api";
 
 interface PerkTreeProps {
   tree: PerkTreeResponse;
@@ -26,6 +26,7 @@ function PerkNode({
   isLoading: boolean;
 }) {
   const [showTooltip, setShowTooltip] = useState(false);
+  const tooltipId = `perk-tooltip-${perk.perk_id}`;
 
   const borderColor = perk.is_unlocked
     ? "#22c55e"
@@ -37,6 +38,9 @@ function PerkNode({
   return (
     <div className="relative">
       <motion.button
+        type="button"
+        aria-label={`${perk.name_ru}. ${perk.description_ru}`}
+        aria-describedby={showTooltip ? tooltipId : undefined}
         className="relative w-20 h-20 rounded-xl border-2 flex flex-col items-center justify-center gap-0.5 transition-colors"
         style={{
           borderColor,
@@ -48,6 +52,8 @@ function PerkNode({
         onClick={() => perk.can_unlock && !isLoading && onUnlock(perk.perk_id)}
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
+        onFocus={() => setShowTooltip(true)}
+        onBlur={() => setShowTooltip(false)}
         disabled={!perk.can_unlock || isLoading}
       >
         <span className="text-2xl">{perk.icon}</span>
@@ -68,6 +74,8 @@ function PerkNode({
       <AnimatePresence>
         {showTooltip && (
           <motion.div
+            id={tooltipId}
+            role="tooltip"
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 5 }}
@@ -116,7 +124,7 @@ export default function PerkTree({ tree, onPerkUnlocked }: PerkTreeProps) {
         perk_points_available: res.perk_points_available,
       });
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Ошибка разблокировки");
+      setError(getApiErrorMessage(err, "Ошибка разблокировки"));
     } finally {
       setLoading(null);
     }
@@ -141,7 +149,18 @@ export default function PerkTree({ tree, onPerkUnlocked }: PerkTreeProps) {
         </div>
       )}
 
+      {tree.perks.length === 0 && (
+        <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-8 text-center">
+          <div className="mb-3 text-4xl">🔒</div>
+          <h4 className="text-lg font-semibold text-white">Дерево перков ещё пусто</h4>
+          <p className="mt-2 text-sm text-gray-400">
+            Для этого класса пока не настроены доступные перки. Возвращайтесь позже.
+          </p>
+        </div>
+      )}
+
       {/* Tiers */}
+      {tree.perks.length > 0 && (
       <div className="space-y-4">
         {tiers.map((tier, i) => (
           <div key={tier}>
@@ -164,6 +183,7 @@ export default function PerkTree({ tree, onPerkUnlocked }: PerkTreeProps) {
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 }

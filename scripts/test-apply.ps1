@@ -4,7 +4,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  QuestionWork - Test Apply" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
-$API_URL = "http://localhost:8000/api/v1"
+$API_URL = "http://localhost:8001/api/v1"
 
 Write-Host "`n[Step 1] Logging in as freelancer..." -ForegroundColor Yellow
 

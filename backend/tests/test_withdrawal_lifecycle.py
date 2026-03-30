@@ -123,8 +123,9 @@ class TestWithdrawalLifecycle:
         }
 
         conn = _make_conn(in_txn=True)
-        # fetchrow calls: tx row (FOR UPDATE), then wallet (FOR UPDATE inside credit)
-        conn.fetchrow.side_effect = [tx_row, None]  # None → credit auto-creates wallet
+        # fetchrow calls: tx row (FOR UPDATE), wallet (FOR UPDATE inside credit) → None,
+        # then INSERT...RETURNING balance inside credit
+        conn.fetchrow.side_effect = [tx_row, None, {"balance": 40.0}]
         conn.execute = AsyncMock(return_value="UPDATE 1")
 
         reject_result = await admin_service.reject_withdrawal(

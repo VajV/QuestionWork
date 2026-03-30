@@ -2,20 +2,22 @@
  * QuestionWork Service Worker
  *
  * Strategy:
- *  - Static assets (/_next/static/, /icons/, /favicon.svg): cache-first
+ *  - Public assets (/icons/, /favicon.svg): cache-first
+ *  - Next.js runtime assets (/_next/): network-only
  *  - API calls (/api/): network-first, no caching (auth-sensitive)
  *  - Navigation (HTML pages): network-first with offline fallback to /offline.html
  *    (if the network is unavailable and no cache entry exists)
  *
- * Install: precaches the marketplace page so it loads instantly offline.
+ * Install: precaches the offline fallback page.
  */
 
-const CACHE_NAME = 'qwork-v1';
-const STATIC_CACHE = 'qwork-static-v1';
+// Bump SW_VERSION on each deploy to invalidate old caches.
+const SW_VERSION = '2';
+const CACHE_NAME = `qwork-v${SW_VERSION}`;
+const STATIC_CACHE = `qwork-static-v${SW_VERSION}`;
 
 /** Resources to precache on install */
 const PRECACHE_URLS = [
-  '/marketplace',
   '/offline.html',
 ];
 
@@ -37,15 +39,17 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
+    (async () => {
+      // Delete caches from older SW versions
+      const keys = await caches.keys();
+      await Promise.all(
         keys
           .filter((key) => key !== CACHE_NAME && key !== STATIC_CACHE)
           .map((key) => caches.delete(key))
-      )
-    )
+      );
+      await self.clients.claim();
+    })()
   );
-  self.clients.claim();
 });
 
 // ── Fetch ─────────────────────────────────────────────────────────────────────
@@ -66,9 +70,15 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets (immutable hashed files) → cache-first
+  // Next.js runtime assets should never be cached by this SW.
+  // In local/dev they change constantly and stale chunks cause runtime crashes.
+  if (url.pathname.startsWith('/_next/')) {
+    event.respondWith(fetch(request));
+    return;
+  }
+
+  // Public static assets → cache-first
   if (
-    url.pathname.startsWith('/_next/static/') ||
     url.pathname.startsWith('/icons/') ||
     url.pathname === '/favicon.svg' ||
     url.pathname === '/manifest.json'
@@ -77,8 +87,20 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // HTML navigation → network-first with cached fallback
-  event.respondWith(networkFirstWithFallback(request));
+  // HTML navigation → network-only (never cache authenticated pages).
+  // Offline: fall back to /offline.html from the precache.
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request).catch(async () => {
+        const offline = await caches.match('/offline.html');
+        return offline || new Response('Offline', { status: 503 });
+      })
+    );
+    return;
+  }
+
+  // Everything else: network-only
+  event.respondWith(fetch(request));
 });
 
 // ── Strategies ───────────────────────────────────────────────────────────────
@@ -95,22 +117,5 @@ async function cacheFirst(request, cacheName = CACHE_NAME) {
     return response;
   } catch {
     return new Response('Offline', { status: 503 });
-  }
-}
-
-async function networkFirstWithFallback(request) {
-  try {
-    const response = await fetch(request);
-    if (response.ok) {
-      const cache = await caches.open(CACHE_NAME);
-      cache.put(request, response.clone());
-    }
-    return response;
-  } catch {
-    const cached = await caches.match(request);
-    if (cached) return cached;
-    // Ultimate fallback: offline page
-    const offline = await caches.match('/offline.html');
-    return offline || new Response('Offline', { status: 503 });
   }
 }

@@ -62,6 +62,20 @@ def _tx_row(tx_id="tx1", user_id="user1", amount=20.0, currency="RUB"):
 
 class TestAdvisoryLock:
     @pytest.mark.asyncio
+    async def test_legacy_processor_refuses_to_run_when_job_path_enabled(self):
+        pool, conn = _make_pool(lock_acquired=True)
+
+        with patch("asyncpg.create_pool", new_callable=AsyncMock, return_value=pool) as create_pool:
+            from scripts import process_withdrawals
+
+            with patch.object(process_withdrawals.settings, "WITHDRAWAL_AUTO_APPROVE_JOBS_ENABLED", True):
+                with pytest.raises(RuntimeError, match="must not run while WITHDRAWAL_AUTO_APPROVE_JOBS_ENABLED=true"):
+                    await process_withdrawals.run(dry_run=False)
+
+        create_pool.assert_not_called()
+        conn.fetch.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_lock_not_acquired_exits_cleanly(self):
         """If pg_try_advisory_lock returns False the processor returns 0."""
         pool, conn = _make_pool(lock_acquired=False)

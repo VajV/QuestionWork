@@ -5,7 +5,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  QuestionWork - Quests API Test" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
-$API_URL = "http://localhost:8000/api/v1"
+$API_URL = "http://localhost:8001/api/v1"
 
 # Test 1: Get all quests
 Write-Host "`n[Test 1/5] Getting all quests..." -ForegroundColor Cyan

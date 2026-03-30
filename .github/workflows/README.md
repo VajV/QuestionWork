@@ -24,3 +24,13 @@ Both jobs run **in parallel**.
 | ESLint | `npm run lint` — enforces code style rules |
 | TypeScript | `npx tsc --noEmit` — type-checks without emitting files |
 | Next.js build | `npm run build` — verifies the production bundle compiles |
+
+## `copilot-customizations.yml` — Customization Validation
+
+Runs whenever workspace Copilot customizations change.
+
+| Step | Description |
+|------|-------------|
+| Setup Python 3.12 | Installs the validation runtime |
+| Validate customizations | Runs `python scripts/validate_copilot_customizations.py` to ensure native instructions, skills, prompts, agents, hooks, and MCP config are present and parseable |
+

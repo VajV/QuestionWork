@@ -4,8 +4,8 @@
 
 "use client";
 
-import { useState } from "react";
-import { QuestApplicationCreate } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { QuestApplicationCreate, getApiErrorMessage } from "@/lib/api";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 
@@ -24,6 +24,20 @@ export default function ApplyModal({
   const [proposedPrice, setProposedPrice] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   /**
    * Валидация сопроводительного письма
@@ -62,24 +76,36 @@ export default function ApplyModal({
         proposed_price: proposedPrice ? Number(proposedPrice) : undefined,
       });
       // Успех — модальное окно закроет родитель
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Ошибка отправки";
-      setError(errorMessage);
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, "Ошибка отправки"));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="w-full max-w-lg">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="w-full max-w-3xl" onClick={(event) => event.stopPropagation()}>
         <Card className="p-6 border-purple-500/50 shadow-xl shadow-purple-500/20">
+          <div role="dialog" aria-modal="true" aria-labelledby="apply-modal-title" className="grid gap-6 lg:grid-cols-[1.2fr,0.8fr]">
+          <div>
           {/* Заголовок */}
-          <div className="mb-6">
-            <h2 className="text-2xl font-bold mb-2">📩 Отклик на квест</h2>
+          <div className="mb-6 flex items-start justify-between gap-4">
+            <div>
+            <h2 id="apply-modal-title" className="text-2xl font-bold mb-2">📩 Отклик на квест</h2>
             <p className="text-gray-400 text-sm line-clamp-1">
               {questTitle}
             </p>
+            </div>
+            <button
+              ref={closeButtonRef}
+              type="button"
+              onClick={onClose}
+              aria-label="Закрыть окно отклика"
+              className="rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-400 transition-colors hover:border-gray-500 hover:text-white"
+            >
+              ✕
+            </button>
           </div>
 
           {/* Сообщение об ошибке */}
@@ -104,7 +130,7 @@ export default function ApplyModal({
               </label>
               <textarea
                 value={coverLetter}
-                onChange={(e) => setCoverLetter(e.target.value)}
+                onChange={(e) => { setCoverLetter(e.target.value); setError(null); }}
                 placeholder="Расскажите, почему вы подходите для этого квеста..."
                 rows={5}
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white placeholder-gray-500 resize-none"
@@ -130,7 +156,7 @@ export default function ApplyModal({
               <input
                 type="number"
                 value={proposedPrice}
-                onChange={(e) => setProposedPrice(e.target.value)}
+                onChange={(e) => { setProposedPrice(e.target.value); setError(null); }}
                 placeholder="5000"
                 min="0"
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-purple-500 text-white placeholder-gray-500"
@@ -172,6 +198,28 @@ export default function ApplyModal({
               </Button>
             </div>
           </form>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+            <div className="text-xs uppercase tracking-[0.25em] text-purple-300/80">Guild pitch</div>
+            <h3 className="mt-3 text-lg font-cinzel font-bold text-white">Как усилить отклик</h3>
+            <ul className="mt-4 space-y-3 text-sm leading-relaxed text-gray-400">
+              <li>• Кратко покажите релевантный опыт и стек.</li>
+              <li>• Если хотите изменить бюджет, обоснуйте цену.</li>
+              <li>• Укажите сроки и формат коммуникации.</li>
+            </ul>
+
+            <div className="mt-6 rounded-xl border border-amber-500/20 bg-amber-950/10 p-4">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-amber-400/80">Статус отклика</div>
+              <div className="mt-2 text-sm text-gray-300">
+                {loading ? "Отправляем заявку в гильдию..." : "Готово к отправке"}
+              </div>
+              <div className="mt-3 text-xs text-gray-500">
+                После отправки заказчик увидит письмо, ставку и сможет назначить вас исполнителем.
+              </div>
+            </div>
+          </div>
+          </div>
         </Card>
       </div>
     </div>

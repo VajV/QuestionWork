@@ -41,6 +41,9 @@ Thumbs.db
 # Logs
 *.log
 
+# Local uploads
+backend/uploads/
+
 # Build artifacts
 *.dll
 *.so

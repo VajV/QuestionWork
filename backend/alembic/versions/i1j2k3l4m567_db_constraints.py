@@ -102,12 +102,12 @@ def upgrade() -> None:
     """)
 
     for table in ("users", "quests", "wallets", "user_class_progress"):
+        op.execute(f"DROP TRIGGER IF EXISTS trg_{table}_updated_at ON {table}")
         op.execute(f"""
-            DROP TRIGGER IF EXISTS trg_{table}_updated_at ON {table};
             CREATE TRIGGER trg_{table}_updated_at
                 BEFORE UPDATE ON {table}
                 FOR EACH ROW
-                EXECUTE FUNCTION trigger_set_updated_at();
+                EXECUTE FUNCTION trigger_set_updated_at()
         """)
 
     # ── P2-19: Index on transactions.created_at ───────────────────────────

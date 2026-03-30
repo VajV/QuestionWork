@@ -1,7 +1,7 @@
 /**
  * QuestChat — inline chat panel for quest participants.
  *
- * Visible only when quest is in_progress / completed / confirmed
+ * Visible only when quest is assigned / in_progress / completed / revision_requested / confirmed
  * and the current user is either the client or the assigned freelancer.
  *
  * Features:
@@ -14,7 +14,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { getQuestMessages, sendQuestMessage, QuestMessage } from "@/lib/api";
+import Link from "next/link";
+import { createQuestChatWsTicket, getApiErrorMessage, getQuestMessages, sendQuestMessage, QuestMessage } from "@/lib/api";
 import { MessageCircle, Send, ChevronUp, Loader2 } from "lucide-react";
 
 interface QuestChatProps {
@@ -23,20 +24,27 @@ interface QuestChatProps {
 }
 
 const POLL_INTERVAL_MS = 10_000;
+const WS_BASE_URL =
+  (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_WS_URL) ||
+  "ws://127.0.0.1:8001";
 
 export default function QuestChat({ questId, currentUserId }: QuestChatProps) {
   const [messages, setMessages] = useState<QuestMessage[]>([]);
   const [total, setTotal] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const latestRef = useRef<string | null>(null);
+  const visibleRef = useRef(true);
+  const wsRef = useRef<WebSocket | null>(null);
 
   // Scroll to bottom when messages change
   const scrollToBottom = useCallback(() => {
@@ -47,15 +55,27 @@ export default function QuestChat({ questId, currentUserId }: QuestChatProps) {
   const fetchMessages = useCallback(
     async (silent = false) => {
       try {
+        if (!visibleRef.current && silent) return;
         if (!silent) setLoading(true);
         const res = await getQuestMessages(questId, 50);
-        setMessages(res.messages);
+        // P2-28: preserve pending optimistic messages during poll
+        setMessages((prev) => {
+          const pending = prev.filter((m) => m.id.startsWith("tmp_"));
+          if (pending.length === 0) return res.messages;
+          const serverIds = new Set(res.messages.map((m) => m.id));
+          const stillPending = pending.filter((m) => !serverIds.has(m.id));
+          return [...res.messages, ...stillPending];
+        });
         setTotal(res.total);
+        setUnreadCount(res.unread_count);
+        if (silent) {
+          setError(null);
+        }
         if (res.messages.length > 0) {
           latestRef.current = res.messages[res.messages.length - 1].created_at;
         }
-      } catch {
-        if (!silent) setError("Не удалось загрузить сообщения");
+      } catch (err: unknown) {
+        if (!silent) setError(getApiErrorMessage(err, "Не удалось загрузить сообщения"));
       } finally {
         if (!silent) setLoading(false);
       }
@@ -75,24 +95,82 @@ export default function QuestChat({ questId, currentUserId }: QuestChatProps) {
 
   // Polling
   useEffect(() => {
-    pollRef.current = setInterval(() => fetchMessages(true), POLL_INTERVAL_MS);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+    const handleVisibilityChange = () => {
+      visibleRef.current = !document.hidden;
+      if (visibleRef.current) {
+        void fetchMessages(true);
+      }
     };
-  }, [fetchMessages]);
+
+    visibleRef.current = !document.hidden;
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    pollRef.current = setInterval(() => fetchMessages(true), POLL_INTERVAL_MS);
+
+    // WebSocket upgrade — supplements polling with real-time push
+    let isDisposed = false;
+
+    const connectWebSocket = async () => {
+      try {
+        const ticket = await createQuestChatWsTicket(questId);
+        if (isDisposed) {
+          return;
+        }
+
+        const ws = new WebSocket(`${WS_BASE_URL}/ws/chat/${questId}`);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          ws.send(JSON.stringify({ type: "auth", ticket: ticket.ticket }));
+        };
+
+        ws.onmessage = (ev: MessageEvent) => {
+          try {
+            const msg = JSON.parse(ev.data as string) as QuestMessage;
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === msg.id)) return prev;
+              return [...prev, msg];
+            });
+          } catch {
+            // Ignore malformed payloads
+          }
+        };
+
+        ws.onerror = () => { wsRef.current = null; };
+        ws.onclose = () => { wsRef.current = null; };
+      } catch {
+        // Polling remains the fallback path.
+      }
+    };
+
+    void connectWebSocket();
+
+    return () => {
+      isDisposed = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [fetchMessages, questId]);
 
   // Load earlier messages
   const loadEarlier = async () => {
     if (messages.length === 0) return;
     const oldest = messages[0].created_at;
     try {
+      setLoadingEarlier(true);
       const res = await getQuestMessages(questId, 50, oldest);
       if (res.messages.length > 0) {
         setMessages((prev) => [...res.messages, ...prev]);
         setTotal(res.total);
+        setUnreadCount(res.unread_count);
       }
-    } catch {
-      // silently ignore
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, "Не удалось загрузить ранние сообщения"));
+    } finally {
+      setLoadingEarlier(false);
     }
   };
 
@@ -107,12 +185,13 @@ export default function QuestChat({ questId, currentUserId }: QuestChatProps) {
 
     // Optimistic append
     const optimistic: QuestMessage = {
-      id: `tmp_${Date.now()}`,
+      id: `tmp_${crypto.randomUUID()}`,
       quest_id: questId,
       author_id: currentUserId,
       author_username: null,
       text: trimmed,
       created_at: new Date().toISOString(),
+      message_type: "user",
     };
     setMessages((prev) => [...prev, optimistic]);
 
@@ -121,8 +200,8 @@ export default function QuestChat({ questId, currentUserId }: QuestChatProps) {
       setMessages((prev) =>
         prev.map((m) => (m.id === optimistic.id ? real : m)),
       );
-    } catch {
-      setError("Ошибка отправки");
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, "Ошибка отправки"));
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
       setText(trimmed);
     } finally {
@@ -154,15 +233,29 @@ export default function QuestChat({ questId, currentUserId }: QuestChatProps) {
         onClick={() => setCollapsed((c) => !c)}
         className="w-full flex items-center justify-between p-5 hover:bg-purple-900/10 transition-colors"
       >
-        <h2 className="text-xl font-cinzel font-bold text-purple-400 flex items-center gap-3">
-          <MessageCircle className="w-5 h-5 opacity-70" />
-          Чат квеста
-          {total > 0 && (
-            <span className="text-xs font-mono bg-purple-900/40 text-purple-300 px-2 py-0.5 rounded ml-1">
-              {total}
+        <div className="flex items-center gap-3">
+          <h2 className="text-xl font-cinzel font-bold text-purple-400 flex items-center gap-3">
+            <MessageCircle className="w-5 h-5 opacity-70" />
+            Чат квеста
+            {total > 0 && (
+              <span className="text-xs font-mono bg-purple-900/40 text-purple-300 px-2 py-0.5 rounded ml-1">
+                {total}
+              </span>
+            )}
+          </h2>
+          {unreadCount > 0 && (
+            <span className="rounded-full bg-amber-500/20 px-2 py-1 text-[10px] font-mono text-amber-300">
+              +{unreadCount} новых
             </span>
           )}
-        </h2>
+          <Link
+            href="/messages"
+            className="hidden rounded-lg border border-gray-800 px-2 py-1 text-[10px] font-mono uppercase tracking-wider text-gray-400 hover:border-purple-700/40 hover:text-purple-300 md:inline-flex"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Диалоги
+          </Link>
+        </div>
         <ChevronUp
           className={`w-5 h-5 text-gray-500 transition-transform ${collapsed ? "rotate-180" : ""}`}
         />
@@ -179,9 +272,10 @@ export default function QuestChat({ questId, currentUserId }: QuestChatProps) {
             {messages.length < total && (
               <button
                 onClick={loadEarlier}
+                disabled={loadingEarlier}
                 className="w-full text-center py-2 text-xs text-purple-400 hover:text-purple-300 font-mono transition-colors"
               >
-                ↑ Загрузить ранние
+                {loadingEarlier ? "Загружаем историю..." : "↑ Загрузить ранние"}
               </button>
             )}
 
@@ -195,6 +289,19 @@ export default function QuestChat({ questId, currentUserId }: QuestChatProps) {
               </p>
             ) : (
               messages.map((msg) => {
+                if (msg.message_type === "system") {
+                  return (
+                    <div key={msg.id} className="flex flex-col items-center">
+                      <div className="max-w-[90%] rounded-full border border-amber-500/20 bg-amber-950/10 px-4 py-2 text-center text-xs text-amber-200">
+                        ✨ {msg.text}
+                      </div>
+                      <span className="text-[10px] text-gray-600 font-mono mt-1 px-1">
+                        {formatTime(msg.created_at)}
+                      </span>
+                    </div>
+                  );
+                }
+
                 const isMine = msg.author_id === currentUserId;
                 return (
                   <div
@@ -229,22 +336,35 @@ export default function QuestChat({ questId, currentUserId }: QuestChatProps) {
 
           {/* Error */}
           {error && (
-            <div className="mx-5 mb-2 text-xs text-red-400 font-mono">
-              {error}
+            <div className="mx-5 mb-2 flex items-center justify-between gap-3 rounded-lg border border-red-500/20 bg-red-950/10 px-3 py-2 text-xs text-red-300 font-mono">
+              <span>{error}</span>
+              <button
+                type="button"
+                onClick={() => fetchMessages()}
+                className="text-amber-300 hover:underline"
+              >
+                Повторить
+              </button>
             </div>
           )}
 
           {/* Input */}
           <div className="border-t border-gray-800 p-4 flex gap-3 items-end">
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={handleKeyDown}
-              rows={1}
-              maxLength={5000}
-              placeholder="Написать сообщение..."
-              className="flex-1 bg-black/40 border border-gray-800 focus:border-purple-600 rounded-lg px-4 py-2.5 text-sm text-gray-200 placeholder-gray-600 resize-none outline-none transition-colors font-inter"
-            />
+            <div className="flex-1">
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={1}
+                maxLength={5000}
+                placeholder="Написать сообщение..."
+                className="w-full bg-black/40 border border-gray-800 focus:border-purple-600 rounded-lg px-4 py-2.5 text-sm text-gray-200 placeholder-gray-600 resize-none outline-none transition-colors font-inter"
+              />
+              <div className="mt-1 flex items-center justify-between text-[10px] text-gray-600 font-mono">
+                <span>Enter — отправить, Shift+Enter — новая строка</span>
+                <span>{text.length}/5000</span>
+              </div>
+            </div>
             <button
               onClick={handleSend}
               disabled={!text.trim() || sending}

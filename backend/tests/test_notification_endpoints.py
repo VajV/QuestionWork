@@ -14,7 +14,10 @@ class _MockConn:
     def is_in_transaction(self):
         return False
 
-    async def fetchrow(self, *a, **kw):
+    async def fetchrow(self, query, *a, **kw):
+        # Return count row for notification queries
+        if "COUNT" in query:
+            return {"total": 0, "unread_count": 0}
         return None
 
     async def fetch(self, *a, **kw):

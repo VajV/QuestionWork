@@ -25,9 +25,12 @@ const GRADE_OPTIONS: { value: UserGrade; label: string; icon: string }[] = [
 ];
 
 const STATUS_OPTIONS: { value: QuestStatus; label: string; icon: string }[] = [
+  { value: 'draft', label: 'Черновик', icon: '📝' },
   { value: 'open', label: 'Открыт', icon: '🟢' },
+  { value: 'assigned', label: 'Назначен', icon: '📌' },
   { value: 'in_progress', label: 'В работе', icon: '🔵' },
   { value: 'completed', label: 'Завершён', icon: '🟣' },
+  { value: 'revision_requested', label: 'На доработке', icon: '🛠️' },
   { value: 'cancelled', label: 'Отменён', icon: '⚫' },
 ];
 
@@ -72,17 +75,20 @@ export default function QuestFilters({ onFilterChange, initialFilters }: QuestFi
   };
 
   return (
-    <Card className="p-4 mb-6">
-      <div className="flex items-center justify-between mb-4">
+    <Card className="mb-6 border-purple-900/20 bg-gradient-to-br from-gray-900 to-gray-950 p-4 md:p-5">
+      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
         <h3 className="text-lg font-bold flex items-center gap-2">
           <span>🔍</span> Фильтры
         </h3>
+        <p className="mt-1 text-sm text-gray-400">Подберите миссии по рангу, навыку и диапазону награды.</p>
+        </div>
         <Button onClick={resetFilters} variant="secondary" className="text-sm py-1 px-3">
           🔄 Сбросить
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
         {/* Фильтр по грейду */}
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -169,7 +175,7 @@ export default function QuestFilters({ onFilterChange, initialFilters }: QuestFi
         <Button
           onClick={applyFilters}
           variant="primary"
-          className="px-8"
+          className="w-full md:w-auto px-8"
         >
           🔎 Применить фильтры
         </Button>

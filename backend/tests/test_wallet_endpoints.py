@@ -167,6 +167,84 @@ def test_wallet_transactions_invalid_limit(client):
         app.dependency_overrides.pop(require_auth, None)
 
 
+def test_wallet_receipt_requires_auth(client):
+    r = client.get("/api/v1/wallet/transactions/tx_1/receipt")
+    assert r.status_code == 401
+
+
+def test_wallet_receipt_success(client):
+    from app.api.deps import require_auth
+    from app.main import app
+
+    app.dependency_overrides[require_auth] = lambda: _make_user("freelancer")
+    try:
+        with (
+            patch("app.api.v1.endpoints.wallet.invoice_service.get_wallet_receipt_data", new=AsyncMock(return_value={"transaction_id": "tx_1"})),
+            patch("app.api.v1.endpoints.wallet.invoice_service.generate_receipt_pdf", return_value=b"%PDF-1.4 receipt"),
+        ):
+            r = client.get("/api/v1/wallet/transactions/tx_1/receipt")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("application/pdf")
+        assert "receipt-tx_1.pdf" in r.headers["content-disposition"]
+        assert r.content.startswith(b"%PDF")
+    finally:
+        app.dependency_overrides.pop(require_auth, None)
+
+
+def test_wallet_statement_requires_auth(client):
+    r = client.get("/api/v1/wallet/statements?from=2026-03-01&to=2026-03-31")
+    assert r.status_code == 401
+
+
+def test_wallet_statement_invalid_range(client):
+    from app.api.deps import require_auth
+    from app.main import app
+
+    app.dependency_overrides[require_auth] = lambda: _make_user("freelancer")
+    try:
+        r = client.get("/api/v1/wallet/statements?from=2026-03-31&to=2026-03-01")
+        assert r.status_code == 400
+    finally:
+        app.dependency_overrides.pop(require_auth, None)
+
+
+def test_wallet_statement_pdf_success(client):
+    from app.api.deps import require_auth
+    from app.main import app
+
+    app.dependency_overrides[require_auth] = lambda: _make_user("freelancer")
+    try:
+        with (
+            patch("app.api.v1.endpoints.wallet.invoice_service.get_wallet_statement_data", new=AsyncMock(return_value={"date_from": "2026-03-01", "date_to": "2026-03-31"})),
+            patch("app.api.v1.endpoints.wallet.invoice_service.generate_statement_pdf", return_value=b"%PDF-1.4 statement"),
+        ):
+            r = client.get("/api/v1/wallet/statements?from=2026-03-01&to=2026-03-31")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("application/pdf")
+        assert "wallet-statement-2026-03-01-2026-03-31.pdf" in r.headers["content-disposition"]
+    finally:
+        app.dependency_overrides.pop(require_auth, None)
+
+
+def test_wallet_statement_csv_success(client):
+    from app.api.deps import require_auth
+    from app.main import app
+
+    app.dependency_overrides[require_auth] = lambda: _make_user("freelancer")
+    try:
+        with (
+            patch("app.api.v1.endpoints.wallet.invoice_service.get_wallet_statement_data", new=AsyncMock(return_value={"date_from": "2026-03-01", "date_to": "2026-03-31"})),
+            patch("app.api.v1.endpoints.wallet.invoice_service.generate_statement_csv", return_value=b"transaction_id\nfoo\n"),
+        ):
+            r = client.get("/api/v1/wallet/statements?from=2026-03-01&to=2026-03-31&format=csv")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/csv")
+        assert "wallet-statement-2026-03-01-2026-03-31.csv" in r.headers["content-disposition"]
+        assert r.content.startswith(b"transaction_id")
+    finally:
+        app.dependency_overrides.pop(require_auth, None)
+
+
 # ---------------------------------------------------------------------------
 # POST /wallet/withdraw
 # ---------------------------------------------------------------------------

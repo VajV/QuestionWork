@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
+import { motion } from "@/lib/motion";
 import {
   ScrollText,
   Search,
@@ -13,25 +13,31 @@ import {
   Flame,
   Pencil,
 } from "lucide-react";
-import { getQuests } from "@/lib/api";
+import { adminGetQuests } from "@/lib/api";
 import type { Quest, QuestStatus } from "@/lib/api";
 import EditQuestModal from "@/components/admin/EditQuestModal";
+import GuildStatusStrip from "@/components/ui/GuildStatusStrip";
+import WorldPanel from "@/components/ui/WorldPanel";
 
 const PAGE_SIZE = 20;
 
 const STATUS_TABS: { value: QuestStatus | ""; label: string }[] = [
   { value: "", label: "Все" },
   { value: "open", label: "Открытые" },
+  { value: "assigned", label: "Назначенные" },
   { value: "in_progress", label: "В работе" },
   { value: "completed", label: "Завершённые" },
+  { value: "revision_requested", label: "На доработке" },
   { value: "confirmed", label: "Подтверждённые" },
   { value: "cancelled", label: "Отменённые" },
 ];
 
 const STATUS_BADGE: Record<string, { bg: string; text: string }> = {
   open: { bg: "bg-green-500/20", text: "text-green-300" },
+  assigned: { bg: "bg-cyan-500/20", text: "text-cyan-300" },
   in_progress: { bg: "bg-blue-500/20", text: "text-blue-300" },
   completed: { bg: "bg-yellow-500/20", text: "text-yellow-300" },
+  revision_requested: { bg: "bg-orange-500/20", text: "text-orange-300" },
   confirmed: { bg: "bg-emerald-500/20", text: "text-emerald-300" },
   cancelled: { bg: "bg-red-500/20", text: "text-red-300" },
 };
@@ -42,16 +48,18 @@ export default function AdminQuestsPage() {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<QuestStatus | "">("");
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editQuestId, setEditQuestId] = useState<string | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   const load = useCallback(
-    async (p: number, status: QuestStatus | "") => {
+    async (p: number, status: QuestStatus | "", q?: string) => {
       setLoading(true);
       setError(null);
       try {
-        const r = await getQuests(p, PAGE_SIZE, status ? { status } : undefined);
+        const r = await adminGetQuests(p, PAGE_SIZE, status || undefined, q || undefined);
         setQuests(r.quests);
         setTotal(r.total);
       } catch {
@@ -64,23 +72,50 @@ export default function AdminQuestsPage() {
   );
 
   useEffect(() => {
-    load(page, statusFilter);
-  }, [page, statusFilter, load]);
+    load(page, statusFilter, debouncedSearch);
+  }, [page, statusFilter, debouncedSearch, load]);
 
-  const filtered = useMemo(() => {
-    if (!search.trim()) return quests;
-    const q = search.toLowerCase();
-    return quests.filter(
-      (quest) =>
-        quest.title.toLowerCase().includes(q) ||
-        quest.client_username?.toLowerCase().includes(q),
-    );
-  }, [quests, search]);
+  // Debounce search input (300ms)
+  useEffect(() => {
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(debounceRef.current);
+  }, [search]);
+
+  const filtered = quests;
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const urgentCount = quests.filter((quest) => quest.is_urgent).length;
 
   return (
     <div className="space-y-6">
+      <GuildStatusStrip
+        mode="ops"
+        eyebrow="Ops quests"
+        title="Операционный контроль квестов теперь живёт в едином ops-layer"
+        description="Статусный фильтр, поиск и объём очереди вынесены наверх, чтобы модерация начиналась с контекста, а не сразу с таблицы."
+        stats={[
+          { label: "Total", value: total, note: "всего квестов", tone: "ops" },
+          { label: "Visible", value: filtered.length, note: "после поиска", tone: "cyan" },
+          { label: "Urgent", value: urgentCount, note: "с высоким давлением", tone: urgentCount > 0 ? "amber" : "slate" },
+          { label: "Page", value: `${page}/${totalPages}`, note: "позиция", tone: "purple" },
+        ]}
+        signals={[
+          { label: statusFilter || 'all statuses', tone: statusFilter ? 'amber' : 'slate' },
+          { label: search.trim() ? 'search active' : 'queue overview', tone: search.trim() ? 'cyan' : 'emerald' },
+        ]}
+      />
+
+      <WorldPanel
+        eyebrow="Moderation control"
+        title="Фильтры модерации и очередь заданий приведены к тому же panel primitive"
+        description="Так ops-интерфейс сохраняет общий язык на dashboard, users, quests и дальше по административному контуру."
+        tone="ops"
+        compact
+      />
+
       {/* Header */}
       <div>
         <h1 className="text-2xl font-cinzel font-bold text-white flex items-center gap-2">
@@ -91,14 +126,15 @@ export default function AdminQuestsPage() {
       </div>
 
       {/* Status tabs */}
-      <div className="flex flex-wrap gap-2">
+      <motion.div layout className="flex flex-wrap gap-2">
         {STATUS_TABS.map((tab) => (
-          <button
+          <motion.button
             key={tab.value}
             onClick={() => {
               setStatusFilter(tab.value as QuestStatus | "");
               setPage(1);
             }}
+            whileTap={{ scale: 0.98 }}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
               statusFilter === tab.value
                 ? "bg-purple-600/30 text-purple-300 border border-purple-500/30"
@@ -106,9 +142,9 @@ export default function AdminQuestsPage() {
             }`}
           >
             {tab.label}
-          </button>
+          </motion.button>
         ))}
-      </div>
+      </motion.div>
 
       {/* Search */}
       <div className="relative max-w-md">
@@ -165,10 +201,10 @@ export default function AdminQuestsPage() {
                     return (
                       <motion.tr
                         key={q.id}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ delay: i * 0.03 }}
-                        className="border-t border-gray-800/50 hover:bg-gray-800/40 transition-colors even:bg-gray-900/30"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.03, duration: 0.22 }}
+                        className="data-table-row border-t border-gray-800/50 hover:bg-gray-800/40 even:bg-gray-900/30"
                       >
                         <td className="px-4 py-3 font-medium text-white max-w-[200px] truncate">
                           {q.is_urgent && (

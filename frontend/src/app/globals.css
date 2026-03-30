@@ -1,37 +1,77 @@
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Inter:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  /* Background */
+  /* ═══ Background Layers ═══ */
   --bg-primary: #0d1117;
   --bg-secondary: #161b22;
   --bg-card: #21262d;
-  
-  /* Borders */
+  --bg-elevated: #2d333b;
+  --bg-overlay: rgba(0, 0, 0, 0.6);
+
+  /* ═══ Borders ═══ */
   --border-default: #30363d;
+  --border-subtle: rgba(255, 255, 255, 0.06);
   --border-highlight: #8b5cf6;
-  
-  /* Rarity Colors (для уровней/грейдов) */
+
+  /* ═══ 3-Tier Accent System ═══ */
+  /* Tier 1 — Gold: primary actions, important numbers, brand */
+  --accent-gold: #f59e0b;
+  --accent-gold-light: #fbbf24;
+  --accent-gold-dim: rgba(245, 158, 11, 0.15);
+  --glow-gold: rgba(245, 158, 11, 0.35);
+
+  /* Tier 2 — Purple: progression, rank, class energy */
+  --accent-purple: #8b5cf6;
+  --accent-purple-light: #a78bfa;
+  --accent-purple-dim: rgba(139, 92, 246, 0.15);
+  --glow-purple: rgba(139, 92, 246, 0.4);
+
+  /* Tier 3 — Cyan: secondary info, activity, system signals */
+  --accent-cyan: #22d3ee;
+  --accent-cyan-light: #67e8f9;
+  --accent-cyan-dim: rgba(34, 211, 238, 0.12);
+  --glow-cyan: rgba(34, 211, 238, 0.3);
+
+  /* ═══ Semantic Colors ═══ */
+  --color-success: #22c55e;
+  --color-danger: #ef4444;
+  --color-danger-dim: rgba(239, 68, 68, 0.12);
+  --color-warning: #eab308;
+
+  /* ═══ Rarity Colors (для уровней/грейдов) ═══ */
   --rarity-novice: #94a3b8;   /* silver */
   --rarity-junior: #22c55e;   /* green */
   --rarity-middle: #3b82f6;   /* blue */
   --rarity-senior: #f59e0b;   /* gold */
-  
-  /* XP Bar */
+
+  /* ═══ XP Bar ═══ */
   --xp-gradient-start: #7c3aed;
   --xp-gradient-end: #c084fc;
-  
-  /* Glow Effects */
-  --glow-purple: rgba(139, 92, 246, 0.4);
-  --glow-gold: rgba(245, 158, 11, 0.3);
 
-  /* Fallback for existing vars */
+  /* ═══ Typography scale ═══ */
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #484f58;
+  --text-accent: var(--accent-gold-light);
+
+  /* ═══ Spacing rhythm ═══ */
+  --radius-sm: 0.5rem;
+  --radius-md: 1rem;
+  --radius-lg: 1.5rem;
+  --radius-xl: 2rem;
+
+  /* ═══ Transition presets ═══ */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 300ms;
+  --duration-slow: 500ms;
+
+  /* ═══ Fallbacks ═══ */
   --background: var(--bg-primary);
-  --foreground: #e0e0e0;
-  --accent: #8b5cf6;
+  --foreground: var(--text-primary);
+  --accent: var(--accent-purple);
   --accent-glow: var(--glow-purple);
 }
 
@@ -162,6 +202,28 @@ body {
   box-shadow: 0 0 20px var(--glow-gold);
 }
 
+.ops-grid-backdrop {
+  position: relative;
+}
+
+.ops-grid-backdrop::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(103, 232, 249, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(103, 232, 249, 0.05) 1px, transparent 1px);
+  background-size: 24px 24px;
+  opacity: 0.3;
+}
+
+.guild-world-shell {
+  background:
+    radial-gradient(circle at top, rgba(139, 92, 246, 0.14), transparent 30%),
+    linear-gradient(180deg, #0d1117 0%, #111827 100%);
+}
+
 /* === Avatar Frame (RPG style) === */
 .avatar-frame {
   width: 120px;
@@ -238,4 +300,541 @@ body {
 .neon-border-purple {
   border-color: rgba(139, 92, 246, 0.5);
   box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.3), 0 0 20px rgba(139, 92, 246, 0.2);
+}
+
+.guild-hub-bg {
+  position: relative;
+  background:
+    radial-gradient(circle at top center, rgba(245, 158, 11, 0.12), transparent 28%),
+    radial-gradient(circle at 80% 18%, rgba(96, 165, 250, 0.12), transparent 24%),
+    linear-gradient(180deg, #090c12 0%, #0b1016 35%, #090b10 100%);
+}
+
+.guild-ambient {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.guild-orb {
+  position: absolute;
+  width: 32rem;
+  height: 32rem;
+  border-radius: 9999px;
+  filter: blur(80px);
+  opacity: 0.28;
+}
+
+.guild-orb-left {
+  top: 2rem;
+  left: -10rem;
+  background: rgba(245, 158, 11, 0.3);
+}
+
+.guild-orb-right {
+  top: 8rem;
+  right: -10rem;
+  background: rgba(59, 130, 246, 0.24);
+}
+
+.guild-gridlines {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.55), transparent 85%);
+}
+
+.guild-chip {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  padding: 0.55rem 0.85rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.guild-stat-panel {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.22));
+  padding: 1rem;
+  backdrop-filter: blur(10px);
+  height: 100%;
+}
+
+.guild-stage-frame {
+  position: relative;
+  border-radius: 2rem;
+  padding: 1px;
+  background: linear-gradient(140deg, rgba(245, 158, 11, 0.5), rgba(255, 255, 255, 0.08), rgba(59, 130, 246, 0.45));
+  box-shadow: 0 40px 120px rgba(0, 0, 0, 0.45);
+}
+
+.guild-stage-panel {
+  position: relative;
+  border-radius: calc(2rem - 1px);
+  background:
+    linear-gradient(180deg, rgba(14, 19, 27, 0.96), rgba(8, 10, 15, 0.98)),
+    linear-gradient(135deg, rgba(245, 158, 11, 0.08), transparent 35%, rgba(59, 130, 246, 0.08));
+  padding: 1.5rem;
+  overflow: hidden;
+}
+
+.guild-stage-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: 2rem;
+  background: linear-gradient(120deg, rgba(255, 255, 255, 0.12), transparent 28%, transparent 72%, rgba(255, 255, 255, 0.08));
+  pointer-events: none;
+}
+
+.parchment-card {
+  border: 1px solid rgba(120, 102, 72, 0.3);
+  border-radius: 1.25rem;
+  background:
+    linear-gradient(180deg, rgba(252, 244, 226, 0.96), rgba(225, 211, 183, 0.96)),
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.4), transparent 35%);
+  padding: 1.25rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 18px 50px rgba(0, 0, 0, 0.18);
+}
+
+.guild-command-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.25rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.24));
+  padding: 1.25rem;
+}
+
+.role-card {
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+}
+
+.quest-scroll-card {
+  border: 1px solid rgba(105, 88, 59, 0.35);
+  border-radius: 1.75rem;
+  background:
+    linear-gradient(180deg, rgba(247, 240, 224, 0.96), rgba(227, 214, 190, 0.95)),
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.35), transparent 32%);
+  padding: 1.75rem;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.2);
+}
+
+.leader-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.leader-card::before {
+  content: "";
+  position: absolute;
+  inset: -20% auto auto -10%;
+  width: 18rem;
+  height: 18rem;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.2), transparent 65%);
+  filter: blur(16px);
+}
+
+.leader-emblem {
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.12), transparent 30%),
+    linear-gradient(180deg, rgba(120, 53, 15, 0.45), rgba(30, 20, 12, 0.85));
+  box-shadow: 0 0 0 8px rgba(245, 158, 11, 0.05), 0 24px 55px rgba(0, 0, 0, 0.35);
+}
+
+.activity-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 1rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.16));
+  padding: 1rem;
+}
+
+.activity-icon {
+  display: flex;
+  width: 2.25rem;
+  height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 1rem;
+}
+
+.cta-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  justify-content: space-between;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 2rem;
+  background:
+    radial-gradient(circle at top left, rgba(245, 158, 11, 0.14), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.12), transparent 24%),
+    linear-gradient(135deg, rgba(17, 24, 39, 0.95), rgba(5, 8, 13, 0.98));
+  padding: 2rem;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.35);
+}
+
+@media (min-width: 768px) {
+  .cta-banner {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .guild-stage-panel {
+    padding: 1.75rem;
+  }
+}
+
+.profile-banner-shell {
+  position: relative;
+}
+
+.guild-world-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at top left, rgba(245, 158, 11, 0.08), transparent 34%),
+    radial-gradient(circle at top right, rgba(34, 211, 238, 0.07), transparent 30%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.12), transparent 35%);
+}
+
+.world-panel-hover {
+  transition: transform 260ms ease, border-color 260ms ease, box-shadow 260ms ease;
+}
+
+.world-panel-hover:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 28px 90px rgba(2, 6, 23, 0.52);
+}
+
+.data-table-row {
+  transition:
+    background-color 160ms ease,
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 180ms ease;
+}
+
+.data-table-row:hover {
+  transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.season-card-drift {
+  animation: seasonFloat 8s ease-in-out infinite;
+}
+
+.season-card-drift:nth-child(2) {
+  animation-delay: 0.6s;
+}
+
+.season-card-drift:nth-child(3) {
+  animation-delay: 1.1s;
+}
+
+@keyframes seasonFloat {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+:where(button, a, input, textarea, select, [role="button"], [role="tab"]):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.95), 0 0 0 4px rgba(34, 211, 238, 0.28);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:focus-within {
+    scroll-behavior: auto;
+  }
+
+  .avatar-frame::before,
+  .season-card-drift {
+    animation: none !important;
+  }
+
+  .world-panel-hover,
+  .data-table-row,
+  .xp-bar-fill,
+  .stat-bar-fill-int,
+  .stat-bar-fill-dex,
+  .stat-bar-fill-cha {
+    transition-duration: 0.01ms !important;
+  }
+
+  .world-panel-hover:hover,
+  .data-table-row:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+.profile-banner-grid {
+  display: grid;
+  gap: 2rem;
+  align-items: stretch;
+}
+
+.profile-hero-card,
+.profile-dossier-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 1.75rem;
+  background:
+    radial-gradient(circle at top left, rgba(245, 158, 11, 0.12), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.1), transparent 24%),
+    linear-gradient(145deg, rgba(19, 24, 34, 0.95), rgba(6, 8, 12, 0.98));
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.35);
+  height: 100%;
+}
+
+.profile-hero-card {
+  padding: 2rem;
+}
+
+.profile-dossier-card {
+  padding: 1.75rem;
+  justify-content: space-between;
+}
+
+.profile-hero-accent {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: 1px;
+  opacity: 0.8;
+}
+
+.profile-hero-avatar {
+  box-shadow: 0 0 0 10px rgba(245, 158, 11, 0.04), 0 30px 60px rgba(0, 0, 0, 0.35);
+}
+
+.profile-class-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.875rem;
+  max-width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0.8rem 1rem;
+}
+
+.profile-highlight-row {
+  display: flex;
+  gap: 0.875rem;
+  align-items: flex-start;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 1rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.18));
+  padding: 0.95rem;
+}
+
+.profile-highlight-icon {
+  display: flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 0.95rem;
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  background: rgba(245, 158, 11, 0.08);
+  font-size: 1.25rem;
+}
+
+.profile-feature-tile {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.25rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.18));
+  padding: 1.25rem;
+}
+
+.profile-contract-card {
+  border: 1px solid rgba(105, 88, 59, 0.35);
+  border-radius: 1.5rem;
+  background:
+    linear-gradient(180deg, rgba(247, 240, 224, 0.96), rgba(227, 214, 190, 0.95)),
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.3), transparent 32%);
+  padding: 1.5rem;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.16);
+}
+
+.profile-trophy-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  align-self: flex-start;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 9999px;
+  background: rgba(245, 158, 11, 0.08);
+  padding: 0.65rem 0.9rem;
+  color: #fcd34d;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.profile-review-shell {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 1.5rem;
+  background: rgba(0, 0, 0, 0.18);
+  padding: 1rem;
+  min-height: 100%;
+}
+
+@media (min-width: 1024px) {
+  .profile-banner-grid {
+    grid-template-columns: minmax(0, 1.18fr) minmax(320px, 0.82fr);
+  }
+}
+
+@media (min-width: 1280px) {
+  .profile-banner-grid {
+    grid-template-columns: minmax(0, 1.22fr) minmax(340px, 0.78fr);
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   Phase 4: Micro-animations & Polish Utilities
+   ═══════════════════════════════════════════════════ */
+
+/* Hover Lift — card hover micro-effect */
+.hover-lift {
+  transition: transform var(--duration-normal) var(--ease-out-expo),
+              box-shadow var(--duration-normal) var(--ease-out-expo);
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+}
+
+/* Shimmer overlay — for loading skeletons or premium accents */
+.shimmer-overlay {
+  position: relative;
+  overflow: hidden;
+}
+.shimmer-overlay::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.03) 45%,
+    rgba(255, 255, 255, 0.06) 50%,
+    rgba(255, 255, 255, 0.03) 55%,
+    transparent 60%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2.5s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
+}
+
+/* Glow Pulse — reusable glowing border pulse */
+.glow-pulse-gold {
+  animation: glow-pulse-gold 2s ease-in-out infinite;
+}
+@keyframes glow-pulse-gold {
+  0%, 100% { box-shadow: 0 0 8px var(--glow-gold); }
+  50% { box-shadow: 0 0 24px var(--glow-gold); }
+}
+
+.glow-pulse-purple {
+  animation: glow-pulse-purple 2s ease-in-out infinite;
+}
+@keyframes glow-pulse-purple {
+  0%, 100% { box-shadow: 0 0 8px var(--glow-purple); }
+  50% { box-shadow: 0 0 24px var(--glow-purple); }
+}
+
+.glow-pulse-cyan {
+  animation: glow-pulse-cyan 2s ease-in-out infinite;
+}
+@keyframes glow-pulse-cyan {
+  0%, 100% { box-shadow: 0 0 8px var(--glow-cyan); }
+  50% { box-shadow: 0 0 24px var(--glow-cyan); }
+}
+
+/* Fade-in stagger delay utilities */
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.1s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.2s; }
+.stagger-5 { animation-delay: 0.25s; }
+.stagger-6 { animation-delay: 0.3s; }
+
+/* ═══════════════════════════════════════════════════
+   Phase 4: Role-based Visual Hints
+   ═══════════════════════════════════════════════════ */
+
+/* Role accent rings for avatars */
+.role-ring-freelancer {
+  border-color: var(--accent-purple);
+  box-shadow: 0 0 12px var(--glow-purple);
+}
+.role-ring-client {
+  border-color: var(--accent-gold);
+  box-shadow: 0 0 12px var(--glow-gold);
+}
+.role-ring-admin {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 12px var(--glow-cyan);
+}
+
+/* Grade-specific text glows */
+.grade-glow-novice { text-shadow: 0 0 6px rgba(148, 163, 184, 0.3); }
+.grade-glow-junior { text-shadow: 0 0 8px rgba(34, 197, 94, 0.4); }
+.grade-glow-middle { text-shadow: 0 0 10px rgba(59, 130, 246, 0.5); }
+.grade-glow-senior { text-shadow: 0 0 12px rgba(245, 158, 11, 0.6); }
+
+/* Grade badge backgrounds */
+.grade-bg-novice { background: rgba(148, 163, 184, 0.08); border-color: rgba(148, 163, 184, 0.2); }
+.grade-bg-junior { background: rgba(34, 197, 94, 0.08); border-color: rgba(34, 197, 94, 0.2); }
+.grade-bg-middle { background: rgba(59, 130, 246, 0.08); border-color: rgba(59, 130, 246, 0.2); }
+.grade-bg-senior { background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.2); }
+
+/* Character class accent colors */
+.class-accent-warrior { --class-color: #ef4444; }
+.class-accent-mage { --class-color: #8b5cf6; }
+.class-accent-rogue { --class-color: #22c55e; }
+.class-accent-healer { --class-color: #06b6d4; }
+.class-accent-berserk { --class-color: #f97316; }
+.class-accent-scout { --class-color: #eab308; }
+
+/* Reduced motion — respect user preference */
+@media (prefers-reduced-motion: reduce) {
+  .hover-lift,
+  .shimmer-overlay::after,
+  .glow-pulse-gold,
+  .glow-pulse-purple,
+  .glow-pulse-cyan,
+  .avatar-frame::before {
+    animation: none !important;
+    transition: none !important;
+  }
 }

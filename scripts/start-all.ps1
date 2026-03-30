@@ -2,10 +2,35 @@
 # Launches backend (FastAPI) and frontend (Next.js) in separate windows
 
 $ErrorActionPreference = "Stop"
+$LegacyWithdrawalGuardMessage = "process_withdrawals.py must not run while WITHDRAWAL_AUTO_APPROVE_JOBS_ENABLED=true. Disable the legacy cron/task before using the new withdrawal job path."
 
 $ROOT = Split-Path -Parent $PSScriptRoot
 $BACKEND_DIR = Join-Path $ROOT "backend"
 $FRONTEND_DIR = Join-Path $ROOT "frontend"
+$ExpectedApiPaths = @(
+    "/api/v1/analytics/events",
+    "/api/v1/analytics/funnel-kpis",
+    "/api/v1/notifications/preferences"
+)
+
+function Get-MissingApiPaths {
+    param([string]$OpenApiUrl)
+
+    try {
+        $doc = Invoke-RestMethod -Uri $OpenApiUrl -TimeoutSec 5 -ErrorAction Stop
+    } catch {
+        return $ExpectedApiPaths
+    }
+
+    $missing = @()
+    foreach ($path in $ExpectedApiPaths) {
+        if (-not ($doc.paths.PSObject.Properties.Name -contains $path)) {
+            $missing += $path
+        }
+    }
+
+    return $missing
+}
 
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan
@@ -74,11 +99,11 @@ function Test-Port {
 
 Write-Host "[CHECK] Checking port availability..." -ForegroundColor Gray
 
-if (Test-Port 8000) {
-    Write-Host "[WARN] Port 8000 is already in use. Backend may already be running." -ForegroundColor Yellow
+if (Test-Port 8001) {
+    Write-Host "[WARN] Port 8001 is already in use. Backend may already be running." -ForegroundColor Yellow
     Write-Host "       To stop: taskkill /F /IM uvicorn.exe" -ForegroundColor Gray
 } else {
-    Write-Host "  [OK] Port 8000 is free" -ForegroundColor Green
+    Write-Host "  [OK] Port 8001 is free" -ForegroundColor Green
 }
 
 if (Test-Port 3000) {
@@ -92,21 +117,11 @@ Write-Host ""
 
 # ── Start Backend ────────────────────────────────────────────────────────────
 
-Write-Host "[START] Launching Backend (FastAPI on :8000)..." -ForegroundColor Cyan
+Write-Host "[START] Launching Backend (FastAPI on :8001)..." -ForegroundColor Cyan
 
-$backendCmd = "cd '$BACKEND_DIR'; " +
-    "Write-Host '--- QuestionWork Backend ---' -ForegroundColor Cyan; " +
-    "if (Test-Path '.venv\Scripts\activate.ps1') { & '.venv\Scripts\activate.ps1'; Write-Host '[OK] venv activated' -ForegroundColor Green } " +
-    "else { Write-Host '[WARN] venv not found, using system Python' -ForegroundColor Yellow }; " +
-    "Write-Host '[INFO] Starting uvicorn on http://127.0.0.1:8000 ...' -ForegroundColor Gray; " +
-    "Write-Host '[INFO] Swagger: http://localhost:8000/docs' -ForegroundColor Gray; " +
-    "Write-Host ''; " +
-    "uvicorn app.main:app --reload --host 127.0.0.1 --port 8000; " +
-    "Write-Host ''; " +
-    "Write-Host '[INFO] Backend stopped. Press any key to close...' -ForegroundColor Yellow; " +
-    "[Console]::ReadKey() | Out-Null"
+$backendRunScript = Join-Path $BACKEND_DIR "scripts\run.ps1"
 
-Start-Process powershell -ArgumentList "-NoExit", "-Command", $backendCmd `
+Start-Process powershell -ArgumentList "-NoExit", "-File", $backendRunScript `
     -WindowStyle Normal
 
 Write-Host "  [OK] Backend window opened" -ForegroundColor Green
@@ -124,7 +139,7 @@ while ($waited -lt $maxWait) {
     Write-Host -NoNewline "."
 
     try {
-        $resp = Invoke-WebRequest -Uri "http://localhost:8000/health" `
+        $resp = Invoke-WebRequest -Uri "http://localhost:8001/health" `
                     -TimeoutSec 2 -ErrorAction Stop
         if ($resp.StatusCode -eq 200) {
             $started = $true
@@ -138,7 +153,16 @@ while ($waited -lt $maxWait) {
 Write-Host ""
 
 if ($started) {
-    Write-Host "  [OK] Backend is up! http://localhost:8000/health" -ForegroundColor Green
+    $missingPaths = Get-MissingApiPaths -OpenApiUrl "http://127.0.0.1:8001/openapi.json"
+    if ($missingPaths.Count -eq 0) {
+        Write-Host "  [OK] Backend is up! http://localhost:8001/health" -ForegroundColor Green
+        Write-Host "  [OK] Runtime route map matches expected analytics/notification endpoints" -ForegroundColor Green
+    } else {
+        Write-Host "  [WARN] Backend responded, but runtime route map is stale:" -ForegroundColor Yellow
+        foreach ($path in $missingPaths) {
+            Write-Host "         - $path" -ForegroundColor Yellow
+        }
+    }
 } else {
     Write-Host "  [WARN] Backend did not respond in ${maxWait}s — it may still be starting." -ForegroundColor Yellow
 }
@@ -161,6 +185,37 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", $frontendCmd `
     -WindowStyle Normal
 
 Write-Host "  [OK] Frontend window opened" -ForegroundColor Green
+
+$startJobRuntimes = ($env:QUESTIONWORK_START_JOB_RUNTIMES -eq "1") -and $started
+
+if ($env:WITHDRAWAL_AUTO_APPROVE_JOBS_ENABLED -in @("1", "true", "True", "TRUE", "yes", "YES", "on", "ON")) {
+    Write-Host "[OPS] $LegacyWithdrawalGuardMessage" -ForegroundColor Yellow
+}
+
+if ($startJobRuntimes) {
+    Write-Host ""
+    Write-Host "[START] Launching trust-layer worker..." -ForegroundColor Cyan
+    $workerRunScript = Join-Path $BACKEND_DIR "scripts\run_worker.ps1"
+    if (Test-Path $workerRunScript) {
+        Start-Process powershell -ArgumentList "-NoExit", "-File", $workerRunScript -WindowStyle Normal
+        Write-Host "  [OK] Worker window opened" -ForegroundColor Green
+    } else {
+        Write-Host "  [WARN] Worker run script not found: $workerRunScript" -ForegroundColor Yellow
+    }
+
+    Write-Host "[START] Launching trust-layer scheduler..." -ForegroundColor Cyan
+    $schedulerRunScript = Join-Path $BACKEND_DIR "scripts\run_scheduler.ps1"
+    if (Test-Path $schedulerRunScript) {
+        Start-Process powershell -ArgumentList "-NoExit", "-File", $schedulerRunScript -WindowStyle Normal
+        Write-Host "  [OK] Scheduler window opened" -ForegroundColor Green
+    } else {
+        Write-Host "  [WARN] Scheduler run script not found: $schedulerRunScript" -ForegroundColor Yellow
+    }
+}
+
+if (($env:QUESTIONWORK_START_JOB_RUNTIMES -eq "1") -and (-not $started)) {
+    Write-Host "[WARN] Skipping trust-layer worker/scheduler because backend health check did not succeed." -ForegroundColor Yellow
+}
 
 # ── Wait for frontend to boot ────────────────────────────────────────────────
 
@@ -202,13 +257,20 @@ Write-Host "   QuestionWork is running!" -ForegroundColor Green
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Frontend  : http://localhost:3000" -ForegroundColor White
-Write-Host "  Backend   : http://localhost:8000" -ForegroundColor White
-Write-Host "  Swagger   : http://localhost:8000/docs" -ForegroundColor White
-Write-Host "  Health    : http://localhost:8000/health" -ForegroundColor White
+Write-Host "  Backend   : http://localhost:8001" -ForegroundColor White
+Write-Host "  Swagger   : http://localhost:8001/docs" -ForegroundColor White
+Write-Host "  Health    : http://localhost:8001/health" -ForegroundColor White
+if ($startJobRuntimes) {
+    Write-Host "  Worker    : separate PowerShell window" -ForegroundColor White
+    Write-Host "  Scheduler : separate PowerShell window" -ForegroundColor White
+}
+if ($env:WITHDRAWAL_AUTO_APPROVE_JOBS_ENABLED -in @("1", "true", "True", "TRUE", "yes", "YES", "on", "ON")) {
+    Write-Host "  Guard     : $LegacyWithdrawalGuardMessage" -ForegroundColor Yellow
+}
 Write-Host ""
 Write-Host "  Test login:" -ForegroundColor Gray
 Write-Host "    Username : novice_dev"    -ForegroundColor Gray
-Write-Host "    Password : password123"   -ForegroundColor Gray
+Write-Host "    Password : ***REDACTED***"   -ForegroundColor Gray
 Write-Host ""
 Write-Host "  Press Enter to open the app in browser (or Ctrl+C to exit)..." -ForegroundColor Yellow
 $null = Read-Host

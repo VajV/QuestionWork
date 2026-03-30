@@ -8,7 +8,9 @@ Event types that trigger checks:
   - registration      : event_data = {} (first login / new account)
 """
 
+import asyncio
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -17,7 +19,29 @@ import asyncpg
 
 from app.models.badge_notification import BadgeAwardResult, UserBadgeEarned
 
+from app.core.cache import redis_cache
+
 logger = logging.getLogger(__name__)
+
+# ──────────────────────────────────────────
+# Badge catalogue cache (TTL-based)
+# ──────────────────────────────────────────
+_BADGE_CACHE: list[dict] | None = None
+_BADGE_CACHE_TS: float = 0.0
+_BADGE_CACHE_TTL = 300  # 5 minutes
+_badge_cache_lock = asyncio.Lock()
+
+
+async def _get_badge_catalogue(conn: asyncpg.Connection) -> list[dict]:
+    """Return cached badge catalogue, refreshing if stale. Thread-safe."""
+    global _BADGE_CACHE, _BADGE_CACHE_TS
+    async with _badge_cache_lock:
+        now_ts = time.time()
+        if _BADGE_CACHE is None or (now_ts - _BADGE_CACHE_TS) > _BADGE_CACHE_TTL:
+            rows = await conn.fetch("SELECT * FROM badges")
+            _BADGE_CACHE = [dict(r) for r in rows]
+            _BADGE_CACHE_TS = time.time()
+    return _BADGE_CACHE
 
 
 # ──────────────────────────────────────────
@@ -35,13 +59,20 @@ def _meets_criteria(criteria_type: str, criteria_value: int, event_data: dict) -
         case "xp":
             return int(event_data.get("xp", 0)) >= v
         case "earnings":
-            return float(event_data.get("earnings", 0.0)) >= v
+            from decimal import Decimal
+            return Decimal(str(event_data.get("earnings", 0))) >= Decimal(str(v))
         case "grade_junior":
             return event_data.get("grade") in ("junior", "middle", "senior")
         case "grade_middle":
             return event_data.get("grade") in ("middle", "senior")
         case "grade_senior":
             return event_data.get("grade") == "senior"
+        case "reviews_given":
+            return int(event_data.get("reviews_given", 0)) >= v
+        case "five_star_received":
+            return int(event_data.get("five_star_received", 0)) >= v
+        case "registration":
+            return True  # always granted; dedup enforced by user_badges UNIQUE constraint
         case _:
             return False
 
@@ -74,8 +105,8 @@ async def check_and_award(
             "check_and_award must be called inside an explicit DB transaction."
         )
 
-    # Load all catalogue badges
-    catalogue = await conn.fetch("SELECT * FROM badges")
+    # Load all catalogue badges (cached for performance with real DB)
+    catalogue = await _get_badge_catalogue(conn)
 
     # Load badges already earned by this user
     already_earned = await conn.fetch(
@@ -154,6 +185,7 @@ async def get_user_badges(
     ]
 
 
+@redis_cache(ttl_seconds=300, key_prefix="badge_catalogue")
 async def get_badge_catalogue(conn: asyncpg.Connection) -> list[dict]:
     """Return all available badges from the platform catalogue."""
     rows = await conn.fetch(

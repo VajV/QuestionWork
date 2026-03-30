@@ -10,6 +10,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Optional
 
 import asyncpg
@@ -26,7 +27,7 @@ async def create_template(
     description: str = "",
     required_grade: str = "novice",
     skills: list[str] | None = None,
-    budget: float = 0.0,
+    budget = 0,
     currency: str = "RUB",
     is_urgent: bool = False,
     required_portfolio: bool = False,
@@ -173,7 +174,11 @@ async def delete_template(
 def _row_to_dict(row: asyncpg.Record) -> dict:
     skills_raw = row["skills"]
     if isinstance(skills_raw, str):
-        skills = json.loads(skills_raw)
+        try:
+            skills = json.loads(skills_raw)
+        except json.JSONDecodeError:
+            logger.warning("Malformed skills JSON in template %s", row["id"])
+            skills = []
     elif isinstance(skills_raw, list):
         skills = skills_raw
     else:
@@ -187,7 +192,7 @@ def _row_to_dict(row: asyncpg.Record) -> dict:
         "description": row["description"],
         "required_grade": row["required_grade"],
         "skills": skills,
-        "budget": float(row["budget"]),
+        "budget": row["budget"],
         "currency": row["currency"],
         "is_urgent": row["is_urgent"],
         "required_portfolio": row["required_portfolio"],
@@ -198,7 +203,7 @@ def _row_to_dict(row: asyncpg.Record) -> dict:
 
 def _to_dict(
     id: str, owner_id: str, name: str, title: str, description: str,
-    required_grade: str, skills: list, budget: float, currency: str,
+    required_grade: str, skills: list, budget: Decimal, currency: str,
     is_urgent: bool, required_portfolio: bool,
     created_at: datetime, updated_at: datetime,
 ) -> dict:

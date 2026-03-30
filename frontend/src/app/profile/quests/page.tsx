@@ -9,15 +9,19 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { motion } from "@/lib/motion";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { getQuests, Quest, QuestStatus } from "@/lib/api";
+import { getApiErrorMessage, getQuests, Quest } from "@/lib/api";
 import Header from "@/components/layout/Header";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
+import GuildStatusStrip from "@/components/ui/GuildStatusStrip";
+import SeasonFactionRail from "@/components/ui/SeasonFactionRail";
+import WorldPanel from "@/components/ui/WorldPanel";
 import QuestStatusBadge from "@/components/quests/QuestStatusBadge";
-import Link from "next/link";
+import RepeatHireCard from "@/components/growth/RepeatHireCard";
 
 type TabType = 'created' | 'assigned' | 'completed';
 
@@ -41,41 +45,35 @@ export default function ProfileQuestsPage() {
     setError(null);
 
     try {
-      // Fetch all quests related to user (no status filter) for correct tab counts
-      const allResponse = await getQuests(1, 100);
-      const allRelated = allResponse.quests.filter(
-        q => q.client_id === user.id || q.assigned_to === user.id
-      );
-      setAllUserQuests(allRelated);
-
-      let filteredQuests: Quest[] = [];
-
-      if (activeTab === 'created') {
-        const response = await getQuests(1, 50);
-        filteredQuests = response.quests.filter(q => q.client_id === user.id);
-      } else if (activeTab === 'assigned') {
-        const response = await getQuests(1, 50, { status: 'in_progress' });
-        filteredQuests = response.quests.filter(q => q.assigned_to === user.id);
-      } else if (activeTab === 'completed') {
-        // Fetch both completed and confirmed quests
-        const [completedRes, confirmedRes] = await Promise.all([
-          getQuests(1, 50, { status: 'completed' }),
-          getQuests(1, 50, { status: 'confirmed' }),
-        ]);
-        const all = [...completedRes.quests, ...confirmedRes.quests];
-        filteredQuests = all.filter(
-          q => q.assigned_to === user.id || q.client_id === user.id
-        );
-      }
-
-      setQuests(filteredQuests);
-    } catch (err) {
+      const allResponse = await getQuests(1, 100, { userId: user.id });
+      setAllUserQuests(allResponse.quests);
+      setQuests(allResponse.quests);
+    } catch (err: unknown) {
       console.error("Ошибка загрузки квестов:", err);
-      setError("Не удалось загрузить квесты");
+      setError(getApiErrorMessage(err, "Не удалось загрузить квесты"));
     } finally {
       setLoading(false);
     }
-  }, [activeTab, user?.id, isAuthenticated]);
+  }, [user, isAuthenticated]);
+
+  const visibleQuests = useMemo(() => {
+    if (!user) {
+      return [];
+    }
+
+    if (activeTab === 'created') {
+      return quests.filter((q) => q.client_id === user.id);
+    }
+
+    if (activeTab === 'assigned') {
+      return quests.filter((q) => q.assigned_to === user.id && (q.status === 'assigned' || q.status === 'in_progress' || q.status === 'revision_requested'));
+    }
+
+    return quests.filter((q) =>
+      (q.status === 'completed' || q.status === 'confirmed') &&
+        (q.assigned_to === user.id || q.client_id === user.id),
+    );
+  }, [activeTab, quests, user]);
 
   useEffect(() => {
     loadQuests();
@@ -106,56 +104,81 @@ export default function ProfileQuestsPage() {
     return null;
   }
 
+  const createdCount = allUserQuests.filter((q) => q.client_id === user.id).length;
+  const assignedCount = allUserQuests.filter((q) => q.assigned_to === user.id && (q.status === 'assigned' || q.status === 'in_progress' || q.status === 'revision_requested')).length;
+  const completedCount = allUserQuests.filter((q) => (q.status === 'completed' || q.status === 'confirmed') && (q.assigned_to === user.id || q.client_id === user.id)).length;
+
   return (
-    <main className="min-h-screen bg-gray-950 text-gray-200 font-inter">
+    <main className="guild-world-shell min-h-screen bg-gray-950 text-gray-200 font-inter">
       <Header />
       
       <div className="container mx-auto px-4 py-8">
+        <GuildStatusStrip
+          mode="profile"
+          eyebrow="Quest ledger"
+          title="Журнал заданий теперь выглядит как карьера, а не как голый список статусов"
+          description="Размещённые контракты, активные миссии и закрытые циклы собраны в один слой, который рифмуется с profile, marketplace и quest board."
+          stats={[
+            { label: "Created", value: createdCount, note: "контракты клиента", tone: "amber" },
+            { label: "Assigned", value: assignedCount, note: "в работе у вас", tone: "purple" },
+            { label: "Completed", value: completedCount, note: "закрытые циклы", tone: "emerald" },
+            { label: "Visible", value: visibleQuests.length, note: "в текущей вкладке", tone: "cyan" },
+          ]}
+          signals={[
+            { label: `${activeTab} tab`, tone: activeTab === 'completed' ? 'emerald' : activeTab === 'assigned' ? 'purple' : 'amber' },
+            { label: error ? 'archive recovery needed' : 'archive synced', tone: error ? 'red' : 'slate' },
+          ]}
+          className="mb-6"
+        />
+
+        <SeasonFactionRail mode="profile" questCount={visibleQuests.length} className="mb-6" />
+
         {/* Заголовок */}
-        <div className="mb-10 mt-4 text-center">
-          <h1 className="text-3xl md:text-4xl font-cinzel font-bold mb-3 text-amber-500 drop-shadow-[0_0_10px_rgba(217,119,6,0.5)] uppercase tracking-widest flex items-center justify-center gap-3">
-            <span className="text-3xl grayscale opacity-70">📋</span>
-            Журнал Заданий
-          </h1>
-          <div className="divider-ornament w-48 mx-auto my-4"></div>
-          <p className="text-gray-400 font-inter">
-            Хроника ваших триумфов и текущих обязательств
-          </p>
-        </div>
+        <WorldPanel
+          eyebrow="Career archive"
+          title="Хроника ваших триумфов и текущих обязательств"
+          description="Новый panel primitive сводит заголовочные блоки на внутренних страницах к единой форме, вместо разрозненных hero-секций."
+          tone="amber"
+          className="mb-8"
+          compact
+        />
 
         {/* Вкладки */}
-        <div className="flex flex-wrap gap-2 mb-8 justify-center">
-          <button
+        <motion.div layout className="flex flex-wrap gap-2 mb-8 justify-center">
+          <motion.button
             onClick={() => setActiveTab('created')}
+            whileTap={{ scale: 0.98 }}
             className={`px-6 py-3 rounded font-cinzel tracking-wider text-sm transition-all border ${
               activeTab === 'created'
                 ? 'bg-amber-950/40 text-amber-400 border-amber-700/50 shadow-[inset_0_0_10px_rgba(217,119,6,0.2)]'
                 : 'bg-black/40 text-gray-400 border-gray-800 hover:border-gray-600 hover:text-gray-300'
             }`}
           >
-            📝 Размещённые Контракты ({allUserQuests.filter(q => q.client_id === user.id).length})
-          </button>
-          <button
+            📝 Размещённые Контракты ({createdCount})
+          </motion.button>
+          <motion.button
             onClick={() => setActiveTab('assigned')}
+            whileTap={{ scale: 0.98 }}
             className={`px-6 py-3 rounded font-cinzel tracking-wider text-sm transition-all border ${
               activeTab === 'assigned'
                 ? 'bg-purple-950/40 text-purple-400 border-purple-700/50 shadow-[inset_0_0_10px_rgba(168,85,247,0.2)]'
                 : 'bg-black/40 text-gray-400 border-gray-800 hover:border-gray-600 hover:text-gray-300'
             }`}
           >
-            ⚡ Активные Миссии ({allUserQuests.filter(q => q.assigned_to === user.id && q.status === 'in_progress').length})
-          </button>
-          <button
+            ⚡ Активные Миссии ({assignedCount})
+          </motion.button>
+          <motion.button
             onClick={() => setActiveTab('completed')}
+            whileTap={{ scale: 0.98 }}
             className={`px-6 py-3 rounded font-cinzel tracking-wider text-sm transition-all border ${
               activeTab === 'completed'
                 ? 'bg-green-950/40 text-green-400 border-green-700/50 shadow-[inset_0_0_10px_rgba(34,197,94,0.2)]'
                 : 'bg-black/40 text-gray-400 border-gray-800 hover:border-gray-600 hover:text-gray-300'
             }`}
           >
-            ✅ Былая Слава ({allUserQuests.filter(q => (q.status === 'completed' || q.status === 'confirmed') && (q.assigned_to === user.id || q.client_id === user.id)).length})
-          </button>
-        </div>
+            ✅ Былая Слава ({completedCount})
+          </motion.button>
+        </motion.div>
 
         {/* Ошибка */}
         {error && (
@@ -172,7 +195,7 @@ export default function ProfileQuestsPage() {
         )}
 
         {/* Пустой список */}
-        {!loading && quests.length === 0 && (
+        {!loading && !error && visibleQuests.length === 0 && (
           <Card className="p-0 border-none bg-transparent">
             <div className="rpg-card p-12 text-center opacity-90">
               <span className="text-6xl mb-6 block grayscale opacity-50 drop-shadow-md">
@@ -191,27 +214,30 @@ export default function ProfileQuestsPage() {
                 {activeTab === 'completed' && 'Завершите свой первый контракт, чтобы ваше имя вошло в легенды.'}
               </p>
               {activeTab === 'created' ? (
-                <Link href="/quests/create">
-                  <Button variant="primary" className="shadow-[0_0_15px_rgba(217,119,6,0.3)]">
-                    ➕ Объявить Контракт
-                  </Button>
-                </Link>
+                <Button href="/quests/create" variant="primary" className="shadow-[0_0_15px_rgba(217,119,6,0.3)]">
+                  ➕ Объявить Контракт
+                </Button>
               ) : (
-                <Link href="/quests">
-                  <Button variant="secondary" className="border-purple-900/50 hover:border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.2)]">
-                    📜 Открыть Доску Заданий
-                  </Button>
-                </Link>
+                <Button href="/quests" variant="secondary" className="border-purple-900/50 hover:border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.2)]">
+                  📜 Открыть Доску Заданий
+                </Button>
               )}
             </div>
           </Card>
         )}
 
         {/* Список квестов */}
-        {!loading && quests.length > 0 && (
+        {!loading && !error && visibleQuests.length > 0 && (
           <div className="space-y-4">
-            {quests.map((quest) => (
-              <Card key={quest.id} className="p-0 border-none shadow-none bg-transparent">
+            {visibleQuests.map((quest, index) => (
+              <motion.div
+                key={quest.id}
+                initial={{ opacity: 0, y: 12 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, amount: 0.15 }}
+                transition={{ duration: 0.24, delay: index * 0.03, ease: "easeOut" }}
+              >
+              <Card className="p-0 border-none shadow-none bg-transparent">
                 <div className="rpg-card p-5 md:p-6 hover:shadow-[0_0_15px_rgba(168,85,247,0.2)] transition-shadow">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
                     {/* Информация о квесте */}
@@ -238,26 +264,26 @@ export default function ProfileQuestsPage() {
 
                     {/* Действия */}
                     <div className="flex items-center md:justify-end shrink-0">
-                      <Link href={`/quests/${quest.id}`} className="w-full md:w-auto">
-                        <Button variant="secondary" className="w-full text-sm font-cinzel tracking-wider border-purple-900/50 hover:border-purple-500/50 bg-black/50">
-                          Изучить Свиток
-                        </Button>
-                      </Link>
+                      <Button href={`/quests/${quest.id}`} variant="secondary" className="w-full md:w-auto text-sm font-cinzel tracking-wider border-purple-900/50 hover:border-purple-500/50 bg-black/50">
+                        Изучить Свиток
+                      </Button>
                     </div>
                   </div>
                 </div>
               </Card>
+              {activeTab === 'completed' && user && quest.client_id === user.id && (
+                <RepeatHireCard quest={quest} freelancerId={quest.assigned_to} />
+              )}
+              </motion.div>
             ))}
           </div>
         )}
 
         {/* Навигация */}
         <div className="mt-10 text-center md:text-left">
-          <Link href="/profile">
-            <Button variant="secondary" className="border-gray-800 hover:border-gray-600 font-cinzel text-sm tracking-wider px-8 opacity-80 hover:opacity-100">
-              ← Назад к Личному Делу
-            </Button>
-          </Link>
+          <Button href="/profile" variant="secondary" className="border-gray-800 hover:border-gray-600 font-cinzel text-sm tracking-wider px-8 opacity-80 hover:opacity-100">
+            ← Назад к Личному Делу
+          </Button>
         </div>
       </div>
     </main>

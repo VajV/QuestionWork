@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { motion } from "@/lib/motion";
 import {
   Search,
   ChevronLeft,
@@ -10,11 +10,13 @@ import {
   AlertCircle,
   Pencil,
   Ban,
-  ShieldAlert,
 } from "lucide-react";
 import { adminGetUsers } from "@/lib/api";
 import type { AdminUserRow, AdminUsersResponse } from "@/types";
 import EditUserModal from "@/components/admin/EditUserModal";
+import ErrorBoundary from "@/components/ui/ErrorBoundary";
+import GuildStatusStrip from "@/components/ui/GuildStatusStrip";
+import WorldPanel from "@/components/ui/WorldPanel";
 
 const PAGE_SIZE = 20;
 
@@ -40,15 +42,17 @@ export default function AdminUsersPage() {
   const [page, setPage] = useState(1);
   const [roleFilter, setRoleFilter] = useState<string>("");
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editUserId, setEditUserId] = useState<string | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
-  const load = useCallback(async (p: number, role: string) => {
+  const load = useCallback(async (p: number, role: string, q?: string) => {
     setLoading(true);
     setError(null);
     try {
-      const r = await adminGetUsers(p, PAGE_SIZE, role || undefined);
+      const r = await adminGetUsers(p, PAGE_SIZE, role || undefined, q || undefined);
       setData(r);
     } catch {
       setError("Не удалось загрузить список пользователей.");
@@ -58,23 +62,50 @@ export default function AdminUsersPage() {
   }, []);
 
   useEffect(() => {
-    load(page, roleFilter);
-  }, [page, roleFilter, load]);
+    load(page, roleFilter, debouncedSearch);
+  }, [page, roleFilter, debouncedSearch, load]);
 
-  const filtered = useMemo(() => {
-    if (!data?.users || !search.trim()) return data?.users ?? [];
-    const q = search.toLowerCase();
-    return data.users.filter(
-      (u) =>
-        u.username.toLowerCase().includes(q) ||
-        (u.email && u.email.toLowerCase().includes(q)),
-    );
-  }, [data, search]);
+  // Debounce search input (300ms)
+  useEffect(() => {
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(debounceRef.current);
+  }, [search]);
+
+  const filtered = data?.users ?? [];
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
 
   return (
+    <ErrorBoundary>
     <div className="space-y-6">
+      <GuildStatusStrip
+        mode="ops"
+        eyebrow="Ops users"
+        title="Пользовательский реестр переведён в общий ops-layer"
+        description="Сверху сразу видно объём реестра, активные фильтры и состояние выборки. Таблица ниже остаётся рабочим инструментом, а не единственным уровнем страницы."
+        stats={[
+          { label: "Total", value: data?.total ?? 0, note: "в реестре", tone: "ops" },
+          { label: "Visible", value: filtered.length, note: "после поиска", tone: "cyan" },
+          { label: "Role", value: roleFilter || 'ALL', note: "активный фильтр", tone: roleFilter ? "amber" : "slate" },
+          { label: "Page", value: `${page}/${totalPages}`, note: "позиция", tone: "purple" },
+        ]}
+        signals={[
+          { label: search.trim() ? 'search active' : 'full registry', tone: search.trim() ? 'cyan' : 'slate' },
+          { label: error ? 'registry degraded' : 'registry stable', tone: error ? 'red' : 'emerald' },
+        ]}
+      />
+
+      <WorldPanel
+        eyebrow="Registry control"
+        title="Поиск и role-фильтр приведены к общему panel primitive"
+        description="Так admin users теперь визуально совпадает с остальными ops-страницами и не выпадает из общего command-center языка."
+        tone="ops"
+        compact
+      />
+
       {/* Header */}
       <div>
         <h1 className="text-2xl font-cinzel font-bold text-white flex items-center gap-2">
@@ -157,7 +188,7 @@ export default function AdminUsersPage() {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ delay: i * 0.03 }}
-                      className="border-t border-gray-800/50 hover:bg-gray-800/40 transition-colors even:bg-gray-900/30"
+                        className="data-table-row border-t border-gray-800/50 hover:bg-gray-800/40 even:bg-gray-900/30"
                     >
                       <td className="px-4 py-3 font-medium text-white">
                         <div className="flex items-center gap-2">
@@ -257,5 +288,6 @@ export default function AdminUsersPage() {
         />
       )}
     </div>
+    </ErrorBoundary>
   );
 }

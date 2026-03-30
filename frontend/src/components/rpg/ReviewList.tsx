@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { motion } from "framer-motion";
+import { motion } from "@/lib/motion";
 import { Star, MessageSquare, ChevronDown } from "lucide-react";
-import { getUserReviews, type Review } from "@/lib/api";
+import { getApiErrorMessage, getUserReviews, type Review } from "@/lib/api";
 
 interface ReviewListProps {
   userId: string;
@@ -42,6 +42,8 @@ function timeAgo(iso: string): string {
 export default function ReviewList({ userId, pageSize = 10 }: ReviewListProps) {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [total, setTotal] = useState(0);
+  const [avgRating, setAvgRating] = useState<number | null>(null);
+  const [reviewCount, setReviewCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,14 +51,16 @@ export default function ReviewList({ userId, pageSize = 10 }: ReviewListProps) {
 
   const load = useCallback(
     async (offset: number, append: boolean) => {
-      append ? setLoadingMore(true) : setLoading(true);
+      if (append) { setLoadingMore(true); } else { setLoading(true); }
       setError(null);
       try {
         const res = await getUserReviews(userId, pageSize, offset);
         setReviews((prev) => (append ? [...prev, ...res.reviews] : res.reviews));
         setTotal(res.total);
-      } catch {
-        setError("Не удалось загрузить отзывы");
+        setAvgRating(res.avg_rating);
+        setReviewCount(res.review_count);
+      } catch (err: unknown) {
+        setError(getApiErrorMessage(err, "Не удалось загрузить отзывы"));
       } finally {
         setLoading(false);
         setLoadingMore(false);
@@ -92,7 +96,18 @@ export default function ReviewList({ userId, pageSize = 10 }: ReviewListProps) {
   }
 
   if (error) {
-    return <p className="text-sm text-red-400 text-center py-4">{error}</p>;
+    return (
+      <div className="rounded-lg border border-red-500/20 bg-red-950/10 px-4 py-5 text-center">
+        <p className="text-sm text-red-300">{error}</p>
+        <button
+          type="button"
+          onClick={() => load(0, false)}
+          className="mt-3 text-sm text-amber-400 hover:underline"
+        >
+          Повторить
+        </button>
+      </div>
+    );
   }
 
   if (reviews.length === 0) {
@@ -106,6 +121,30 @@ export default function ReviewList({ userId, pageSize = 10 }: ReviewListProps) {
 
   return (
     <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-4">
+          <div className="flex items-center gap-2">
+            <Star className="h-4 w-4 text-amber-400" fill="#f59e0b" stroke="#f59e0b" />
+            <span className="text-xs font-mono uppercase tracking-[0.24em] text-gray-500">Средняя оценка</span>
+          </div>
+          <div className="mt-3 flex items-end gap-3">
+            <span className="font-cinzel text-3xl text-amber-300">
+              {avgRating ? avgRating.toFixed(1) : "-"}
+            </span>
+            {avgRating ? <StarRow rating={Math.round(avgRating)} /> : <span className="text-sm text-gray-500">пока нет</span>}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-4">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-sky-300" />
+            <span className="text-xs font-mono uppercase tracking-[0.24em] text-gray-500">Подтверждений</span>
+          </div>
+          <div className="mt-3 font-cinzel text-3xl text-stone-100">{reviewCount}</div>
+          <p className="mt-1 text-sm text-gray-400">публичных отзывов от заказчиков и союзников</p>
+        </div>
+      </div>
+
       {reviews.map((r, i) => (
         <motion.div
           key={r.id}

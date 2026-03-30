@@ -1,17 +1,64 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState, FormEvent, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 
 type UserRole = "client" | "freelancer";
 
+const PASSWORD_SPECIAL_CHARACTERS = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+
+function getPasswordRuleStates(password: string) {
+  return [
+    {
+      key: "length",
+      label: "Минимум 8 символов",
+      passed: password.length >= 8,
+    },
+    {
+      key: "uppercase",
+      label: "Хотя бы одна заглавная буква",
+      passed: /[A-Z]/.test(password),
+    },
+    {
+      key: "digit",
+      label: "Хотя бы одна цифра",
+      passed: /\d/.test(password),
+    },
+    {
+      key: "special",
+      label: "Хотя бы один спецсимвол",
+      passed: Array.from(password).some((char) => PASSWORD_SPECIAL_CHARACTERS.includes(char)),
+    },
+  ];
+}
+
+function getPasswordValidationMessage(password: string): string | null {
+  const failedRule = getPasswordRuleStates(password).find((rule) => !rule.passed);
+
+  if (!failedRule) {
+    return null;
+  }
+
+  if (failedRule.key === "length") {
+    return "Пароль должен содержать минимум 8 символов";
+  }
+  if (failedRule.key === "uppercase") {
+    return "Пароль должен содержать хотя бы одну заглавную букву";
+  }
+  if (failedRule.key === "digit") {
+    return "Пароль должен содержать хотя бы одну цифру";
+  }
+  return "Пароль должен содержать хотя бы один спецсимвол";
+}
+
 export default function RegisterPage() {
   const router = useRouter();
-  const { register, isAuthenticated } = useAuth();
+  const { register, isAuthenticated, loading: authLoading } = useAuth();
   
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -21,9 +68,31 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const passwordRuleStates = getPasswordRuleStates(password);
+
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      router.push("/profile");
+    }
+  }, [authLoading, isAuthenticated, router]);
+
+  useEffect(() => {
+    trackAnalyticsEvent("register_started");
+  }, []);
+
   if (isAuthenticated) {
-    router.push("/profile");
     return null;
+  }
+
+  if (authLoading) {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900/20 to-gray-900 flex items-center justify-center px-4">
+        <Card className="w-full max-w-md p-8 text-center">
+          <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-400">Проверка сессии...</p>
+        </Card>
+      </main>
+    );
   }
 
   const handleSubmit = async (e: FormEvent) => {
@@ -35,7 +104,7 @@ export default function RegisterPage() {
       return;
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;
     if (!emailRegex.test(email)) {
       setError("Некорректный email");
       return;
@@ -46,8 +115,9 @@ export default function RegisterPage() {
       return;
     }
 
-    if (password.length < 8) {
-      setError("Пароль должен содержать минимум 8 символов");
+    const passwordValidationMessage = getPasswordValidationMessage(password);
+    if (passwordValidationMessage) {
+      setError(passwordValidationMessage);
       return;
     }
 
@@ -67,7 +137,9 @@ export default function RegisterPage() {
       });
 
       if (result.success) {
-        setTimeout(() => router.push("/profile"), 100);
+        trackAnalyticsEvent("register_completed", { role });
+        const dest = role === "freelancer" ? "/onboarding" : "/profile";
+        router.push(dest);
       } else {
         setError(result.error || "Ошибка регистрации");
       }
@@ -108,6 +180,7 @@ export default function RegisterPage() {
               id="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
               className="w-full px-4 py-3 bg-black/40 border border-purple-900/50 rounded focus:outline-none focus:border-amber-500/50 focus:bg-purple-950/20 text-gray-200 placeholder-gray-600 font-mono transition-all shadow-inner"
               placeholder="novice_dev"
               disabled={loading}
@@ -124,6 +197,7 @@ export default function RegisterPage() {
               id="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
               className="w-full px-4 py-3 bg-black/40 border border-purple-900/50 rounded focus:outline-none focus:border-amber-500/50 focus:bg-purple-950/20 text-gray-200 placeholder-gray-600 font-mono transition-all shadow-inner"
               placeholder="you@example.com"
               disabled={loading}
@@ -140,11 +214,22 @@ export default function RegisterPage() {
               id="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
               className="w-full px-4 py-3 bg-black/40 border border-purple-900/50 rounded focus:outline-none focus:border-amber-500/50 focus:bg-purple-950/20 text-gray-200 placeholder-gray-600 font-mono transition-all shadow-inner"
               placeholder="••••••••"
               disabled={loading}
               required
             />
+            <div className="mt-3 space-y-2 rounded border border-purple-900/40 bg-black/30 p-3">
+              {passwordRuleStates.map((rule) => (
+                <div
+                  key={rule.key}
+                  className={`text-xs font-inter ${rule.passed ? "text-emerald-300" : "text-gray-400"}`}
+                >
+                  {rule.passed ? "✓" : "•"} {rule.label}
+                </div>
+              ))}
+            </div>
           </div>
 
           <div>
@@ -156,6 +241,7 @@ export default function RegisterPage() {
               id="confirmPassword"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
+              autoComplete="new-password"
               className="w-full px-4 py-3 bg-black/40 border border-purple-900/50 rounded focus:outline-none focus:border-amber-500/50 focus:bg-purple-950/20 text-gray-200 placeholder-gray-600 font-mono transition-all shadow-inner"
               placeholder="••••••••"
               disabled={loading}
@@ -210,3 +296,5 @@ export default function RegisterPage() {
     </main>
   );
 }
+
+

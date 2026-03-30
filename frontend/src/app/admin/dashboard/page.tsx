@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "@/lib/motion";
 import {
   Users,
   ScrollText,
@@ -26,7 +26,9 @@ import {
   adminGetLogs,
   adminCleanupNotifications,
   adminBroadcastNotification,
+  getApiErrorMessage,
 } from "@/lib/api";
+import GuildStatusStrip from "@/components/ui/GuildStatusStrip";
 import type {
   AdminPlatformStats,
   AdminTransactionsResponse,
@@ -143,8 +145,8 @@ export default function AdminDashboard() {
       setBcMessage("");
       setBcUserIds("");
       reload();
-    } catch {
-      setBcResult("Ошибка при отправке рассылки.");
+    } catch (err: unknown) {
+      setBcResult(getApiErrorMessage(err, "Ошибка при отправке рассылки."));
     } finally {
       setBcLoading(false);
     }
@@ -238,6 +240,26 @@ export default function AdminDashboard() {
   ];
 
   const pendingTxs = pendingData?.transactions ?? [];
+  const opsSignals = [
+    {
+      label: stats?.pending_withdrawals
+        ? `${stats.pending_withdrawals} withdrawal alerts`
+        : "withdrawals stable",
+      tone: stats?.pending_withdrawals ? ("amber" as const) : ("ops" as const),
+    },
+    {
+      label: stats?.banned_users
+        ? `${stats.banned_users} banned users`
+        : "no active bans surge",
+      tone: stats?.banned_users ? ("red" as const) : ("slate" as const),
+    },
+    {
+      label: recentLogs.length > 0
+        ? `${recentLogs.length} recent ops logs`
+        : "logs queue quiet",
+      tone: recentLogs.length > 0 ? ("cyan" as const) : ("slate" as const),
+    },
+  ];
 
   // Breakdown helpers
   const roleEntries = stats?.users_by_role
@@ -256,6 +278,40 @@ export default function AdminDashboard() {
           Обзор состояния платформы — God Mode
         </p>
       </div>
+
+      <GuildStatusStrip
+        mode="ops"
+        eyebrow="Ops command layer"
+        title="Админка теперь читается как отдельный операционный контур"
+        description="Сверху собраны главные сигналы платформы: деньги, очереди на вывод, активность админов и состояние инцидентов. Это отделяет ops-зону от пользовательского guild UI."
+        stats={[
+          {
+            label: "Users",
+            value: stats?.total_users ?? 0,
+            note: "active registry",
+            tone: "cyan",
+          },
+          {
+            label: "Revenue",
+            value: `${(stats?.total_revenue ?? 0).toLocaleString("ru")} ₽`,
+            note: "platform gross",
+            tone: "emerald",
+          },
+          {
+            label: "Pending payouts",
+            value: stats?.pending_withdrawals ?? 0,
+            note: "manual queue",
+            tone: stats?.pending_withdrawals ? "amber" : "ops",
+          },
+          {
+            label: "Ops logs",
+            value: recentLogs.length,
+            note: "recent actions",
+            tone: "purple",
+          },
+        ]}
+        signals={opsSignals}
+      />
 
       {/* Stat cards — 4 cols */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -470,7 +526,7 @@ export default function AdminDashboard() {
                     </span>
                   </div>
                   <span className="text-sm font-mono font-bold text-yellow-400">
-                    {tx.amount} {tx.currency}
+                    {tx.amount.toLocaleString("ru-RU")} {tx.currency}
                   </span>
                 </div>
               ))}

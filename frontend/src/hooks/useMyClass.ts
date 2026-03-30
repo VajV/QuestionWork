@@ -32,7 +32,7 @@ export function useMyClass(): UseMyClassResult {
     setLoading(true);
     try {
       const info = await getMyClass();
-      setClassInfo(info);
+      setClassInfo(info.has_class ? info : null);
     } catch {
       // User has no class or not authenticated — that's fine
       setClassInfo(null);

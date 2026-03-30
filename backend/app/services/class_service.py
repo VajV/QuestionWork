@@ -34,6 +34,7 @@ from app.core.classes import (
     get_ability_config,
 )
 from app.core.events import ClassLevelUp, event_bus
+from app.core.cache import redis_cache, invalidate_cache_scope
 from app.models.character_class import (
     CharacterClassInfo,
     ClassBonusInfo,
@@ -127,8 +128,19 @@ def list_classes(user_level: int, current_class: Optional[str] = None) -> ClassL
     return ClassListResponse(classes=classes, user_level=user_level, current_class=current_class)
 
 
-async def get_user_class_info(conn: asyncpg.Connection, user_id: str) -> Optional[UserClassInfo]:
-    """Load user's current class and progression from DB."""
+def build_empty_user_class_info() -> UserClassInfo:
+    return UserClassInfo(
+        has_class=False,
+        class_id="",
+        name="",
+        name_ru="Класс не выбран",
+        icon="🜁",
+        color="#64748b",
+    )
+
+
+async def _compute_user_class_info(conn: asyncpg.Connection, user_id: str) -> Optional[UserClassInfo]:
+    """Load user's current class and progression from DB (un-cached internal helper)."""
     user_row = await conn.fetchrow(
         "SELECT character_class, class_selected_at, class_trial_expires_at FROM users WHERE id = $1",
         user_id,
@@ -176,6 +188,7 @@ async def get_user_class_info(conn: asyncpg.Connection, user_id: str) -> Optiona
     weaknesses = [_bonus_info(k, v, is_weakness=True) for k, v in cfg.weaknesses.items()]
 
     return UserClassInfo(
+        has_class=True,
         class_id=cfg.id.value,
         name=cfg.name,
         name_ru=cfg.name_ru,
@@ -202,6 +215,23 @@ async def get_user_class_info(conn: asyncpg.Connection, user_id: str) -> Optiona
     )
 
 
+@redis_cache(ttl_seconds=180, key_prefix="class_info", scope_builder=lambda conn, user_id: f"user:{user_id}")
+async def _cached_class_info_dict(conn: asyncpg.Connection, user_id: str) -> Optional[dict]:
+    """Cached dict representation of class info for Redis storage."""
+    result = await _compute_user_class_info(conn, user_id)
+    if result is None:
+        return None
+    return result.model_dump(mode="json")
+
+
+async def get_user_class_info(conn: asyncpg.Connection, user_id: str) -> Optional[UserClassInfo]:
+    """Load user's current class and progression, with Redis cache (TTL 180s)."""
+    data = await _cached_class_info_dict(conn, user_id)
+    if data is None:
+        return None
+    return UserClassInfo.model_validate(data)
+
+
 # ────────────────────────────────────────────
 # Class selection
 # ────────────────────────────────────────────
@@ -222,6 +252,9 @@ async def select_class(
     # Validation
     if user.role != UserRoleEnum.freelancer.value:
         raise PermissionError("Только фрилансеры могут выбирать класс")
+
+    if getattr(user, "is_banned", False):
+        raise PermissionError("Заблокированные пользователи не могут выбирать класс")
 
     cfg = get_class_config(class_id)
     if cfg is None:
@@ -298,6 +331,7 @@ async def select_class(
         event_type="class_selected",
     )
 
+    await invalidate_cache_scope("class_info", "user", user.id)
     class_info = await get_user_class_info(conn, user.id)
     msg = (
         f"Пробный период {cfg.name_ru} начат! 24 часа для тестирования."
@@ -341,6 +375,7 @@ async def confirm_class(conn: asyncpg.Connection, user: UserProfile) -> ClassSel
         event_type="class_selected",
     )
 
+    await invalidate_cache_scope("class_info", "user", user.id)
     class_info = await get_user_class_info(conn, user.id)
     return ClassSelectResponse(
         message=f"Класс {cfg.name_ru} подтверждён!",
@@ -364,6 +399,7 @@ async def reset_class(conn: asyncpg.Connection, user: UserProfile) -> dict:
         now,
         user.id,
     )
+    await invalidate_cache_scope("class_info", "user", user.id)
     return {"message": "Класс сброшен. Вы можете выбрать новый класс через 30 дней."}
 
 
@@ -407,9 +443,11 @@ async def add_class_xp(
     if class_xp_gain <= 0:
         return {"class_xp_gained": 0, "class_level_up": False}
 
-    # ── Phase 2: apply perk XP bonuses and Rage Mode ──
+    # ── Phase 2: apply perk XP bonuses and active ability effects ──
     perk_effects = await get_active_perk_effects(conn, user_id, class_id_str)
-    rage_active = await is_rage_mode_active(conn, user_id)
+    ability_effects = await get_active_ability_effects(conn, user_id)
+    # rage_active = burnout_immune is active (only Berserk rage_mode sets this)
+    rage_active = bool(ability_effects.get("burnout_immune", False))
 
     perk_multiplier = 1.0
     # Perk: xp_urgent_bonus_extra (only for urgent quests)
@@ -418,11 +456,9 @@ async def add_class_xp(
     # Perk: xp_normal_bonus (for non-urgent quests)
     if not is_urgent and "xp_normal_bonus" in perk_effects:
         perk_multiplier += perk_effects["xp_normal_bonus"]
-    # Rage Mode: +XP for ALL quests
-    if rage_active:
-        rage_ability = get_ability_config(class_id_str, "rage_mode")
-        if rage_ability:
-            perk_multiplier += rage_ability.effects.get("xp_all_bonus", 0)
+    # Active abilities: xp_all_bonus (any class — Rage Mode, Arcane Surge, etc.)
+    if ability_effects.get("xp_all_bonus", 0):
+        perk_multiplier += ability_effects["xp_all_bonus"]
 
     class_xp_gain = int(class_xp_gain * perk_multiplier)
 
@@ -430,7 +466,7 @@ async def add_class_xp(
 
     # Update progression (FOR UPDATE to prevent race on consecutive_quests)
     progress = await conn.fetchrow(
-        "SELECT * FROM user_class_progress WHERE user_id = $1 FOR UPDATE",
+        "SELECT class_xp, class_level, quests_completed, consecutive_quests FROM user_class_progress WHERE user_id = $1 FOR UPDATE",
         user_id,
     )
     if not progress:
@@ -545,6 +581,7 @@ async def add_class_xp(
                     *stat_args,
                 )
 
+    await invalidate_cache_scope("class_info", "user", user_id)
     return {
         "class_xp_gained": class_xp_gain,
         "class_level_up": level_up,
@@ -658,11 +695,12 @@ async def get_user_perk_tree(
     available = total_points - perk_points_spent
 
     perks: list[PerkInfo] = []
-    for p in get_class_perks(class_id_str):
+    all_perks = get_class_perks(class_id_str)
+    for p in all_perks:
         if p.id in owned_ids:
             perks.append(_perk_to_info(p, is_unlocked=True, can_do=False, reason="ok"))
         else:
-            can_do, reason = can_unlock_perk(p, class_level, owned_ids, available)
+            can_do, reason = can_unlock_perk(p, class_level, owned_ids, available, all_perks=all_perks)
             perks.append(_perk_to_info(p, is_unlocked=False, can_do=can_do, reason=reason))
 
     return PerkTreeResponse(
@@ -692,7 +730,7 @@ async def unlock_perk(
     total_points = calculate_perk_points_available(class_level, cfg.perk_points_per_level) + bonus_perk_points
     available = total_points - perk_points_spent
 
-    ok, reason = can_unlock_perk(perk, class_level, owned_ids, available)
+    ok, reason = can_unlock_perk(perk, class_level, owned_ids, available, all_perks=get_class_perks(class_id_str))
     if not ok:
         raise ValueError(reason)
 
@@ -723,6 +761,7 @@ async def unlock_perk(
     )
 
     perk_info = _perk_to_info(perk, is_unlocked=True, can_do=False, reason="ok")
+    await invalidate_cache_scope("class_info", "user", user_id)
     return PerkUnlockResponse(
         message=f"Перк «{perk.name_ru}» разблокирован!",
         perk=perk_info,
@@ -844,7 +883,7 @@ async def activate_ability(
 
     # Check cooldown
     db_ability = await conn.fetchrow(
-        "SELECT * FROM user_abilities WHERE user_id = $1 AND ability_id = $2",
+        "SELECT cooldown_until, active_until FROM user_abilities WHERE user_id = $1 AND ability_id = $2",
         user_id, ability_id,
     )
     if db_ability:
@@ -945,3 +984,33 @@ async def is_rage_mode_active(
     if not row or not row["rage_active_until"]:
         return False
     return row["rage_active_until"] > datetime.now(timezone.utc)
+
+
+async def get_active_ability_effects(
+    conn: asyncpg.Connection, user_id: str
+) -> dict[str, float | int | bool]:
+    """Aggregate effects from ALL currently active abilities for a user.
+
+    Queries `user_abilities WHERE active_until > now`, then merges effects
+    from each ability's config (sum numbers, OR booleans).
+    """
+    now = datetime.now(timezone.utc)
+    rows = await conn.fetch(
+        "SELECT ability_id, class_id FROM user_abilities "
+        "WHERE user_id = $1 AND active_until > $2",
+        user_id, now,
+    )
+    if not rows:
+        return {}
+
+    merged: dict[str, float | int | bool] = {}
+    for row in rows:
+        ability_cfg = get_ability_config(row["class_id"], row["ability_id"])
+        if ability_cfg is None:
+            continue
+        for ek, ev in ability_cfg.effects.items():
+            if isinstance(ev, bool):
+                merged[ek] = merged.get(ek, False) or ev  # type: ignore[assignment]
+            else:
+                merged[ek] = merged.get(ek, 0) + ev  # type: ignore[assignment]
+    return merged

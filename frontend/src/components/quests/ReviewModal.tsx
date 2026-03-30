@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "@/lib/motion";
 import { Star, X, Send, Sparkles } from "lucide-react";
-import { createReview } from "@/lib/api";
+import { createReview, getApiErrorMessage } from "@/lib/api";
 import type { Review } from "@/lib/api";
 
 interface ReviewModalProps {
@@ -26,6 +26,7 @@ export default function ReviewModal({
   const [comment, setComment] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const displayRating = hoverRating || rating;
 
@@ -36,6 +37,19 @@ export default function ReviewModal({
     4: "Хорошо",
     5: "Отлично!",
   };
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   const handleSubmit = useCallback(async () => {
     if (rating === 0) {
@@ -53,7 +67,7 @@ export default function ReviewModal({
       });
       onSubmitted(review);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Ошибка при отправке отзыва");
+      setError(getApiErrorMessage(err, "Ошибка при отправке отзыва"));
     } finally {
       setLoading(false);
     }
@@ -75,6 +89,9 @@ export default function ReviewModal({
 
         {/* Modal */}
         <motion.div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="review-modal-title"
           className="relative w-full max-w-md bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden"
           initial={{ scale: 0.9, y: 20 }}
           animate={{ scale: 1, y: 0 }}
@@ -83,11 +100,14 @@ export default function ReviewModal({
         >
           {/* Header */}
           <div className="flex items-center justify-between p-5 border-b border-gray-800">
-            <h2 className="font-cinzel font-bold text-lg text-white">
+            <h2 id="review-modal-title" className="font-cinzel font-bold text-lg text-white">
               ⭐ Оставить отзыв
             </h2>
             <button
+              ref={closeButtonRef}
+              type="button"
               onClick={onClose}
+              aria-label="Закрыть окно отзыва"
               className="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
             >
               <X className="w-5 h-5" />
@@ -108,6 +128,8 @@ export default function ReviewModal({
                   <motion.button
                     key={star}
                     type="button"
+                    aria-label={`Оценка ${star} из 5`}
+                    aria-pressed={rating === star}
                     className="p-0.5 focus:outline-none"
                     onMouseEnter={() => setHoverRating(star)}
                     onMouseLeave={() => setHoverRating(0)}
@@ -179,6 +201,7 @@ export default function ReviewModal({
           {/* Footer */}
           <div className="p-5 border-t border-gray-800 flex gap-3">
             <button
+              type="button"
               onClick={onClose}
               className="flex-1 px-4 py-2.5 rounded-lg border border-gray-700 text-sm text-gray-300 hover:bg-gray-800 transition-colors"
               disabled={loading}
@@ -186,6 +209,7 @@ export default function ReviewModal({
               Отмена
             </button>
             <motion.button
+              type="button"
               onClick={handleSubmit}
               className="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2"
               style={{

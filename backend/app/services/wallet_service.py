@@ -18,6 +18,29 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 MONEY_QUANT = Decimal("0.01")
+ALLOWED_TRANSACTION_TYPES = frozenset({
+    "income",
+    "expense",
+    "hold",
+    "refund",
+    "urgent_bonus_charge",
+    "urgent_bonus",
+    "commission",
+    "withdrawal",
+    "admin_adjust",
+    "credit",
+    "quest_payment",
+    "release",
+    "platform_fee",
+})
+ALLOWED_TRANSACTION_STATUSES = frozenset({
+    "pending",
+    "completed",
+    "rejected",
+    "refunded",
+    "held",
+    "failed",
+})
 
 
 def _to_decimal(value) -> Decimal:
@@ -30,6 +53,62 @@ def _to_decimal(value) -> Decimal:
 def quantize_money(value) -> Decimal:
     """Normalize money amounts to 2 decimal places using ROUND_HALF_UP."""
     return _to_decimal(value).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+
+
+def _validate_transaction_type(tx_type: str) -> str:
+    if tx_type not in ALLOWED_TRANSACTION_TYPES:
+        raise ValueError(f"Unsupported transaction type: {tx_type}")
+    return tx_type
+
+
+def _validate_transaction_status(status: str) -> str:
+    if status not in ALLOWED_TRANSACTION_STATUSES:
+        raise ValueError(f"Unsupported transaction status: {status}")
+    return status
+
+
+async def _insert_transaction(
+    conn: asyncpg.Connection,
+    *,
+    user_id: str,
+    amount: Decimal,
+    currency: str,
+    tx_type: str,
+    status: str,
+    created_at: datetime,
+    quest_id: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
+) -> str:
+    tx_id = str(uuid.uuid4())
+    await conn.execute(
+        """
+        INSERT INTO transactions (id, user_id, quest_id, amount, currency, type, status, idempotency_key, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        """,
+        tx_id,
+        user_id,
+        quest_id,
+        amount,
+        currency,
+        _validate_transaction_type(tx_type),
+        _validate_transaction_status(status),
+        idempotency_key,
+        created_at,
+    )
+    return tx_id
+
+
+async def _update_transaction_status(
+    conn: asyncpg.Connection,
+    *,
+    transaction_id: str,
+    status: str,
+) -> None:
+    await conn.execute(
+        "UPDATE transactions SET status = $1 WHERE id = $2",
+        _validate_transaction_status(status),
+        transaction_id,
+    )
 
 
 def _assert_in_transaction(conn: asyncpg.Connection) -> None:
@@ -218,19 +297,15 @@ async def credit(
         new_balance = quantize_money(result["balance"])
 
     # Ledger entry
-    await conn.execute(
-        """
-        INSERT INTO transactions (id, user_id, quest_id, amount, currency, type, status, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        """,
-        str(uuid.uuid4()),
-        user_id,
-        quest_id,
-        amount,
-        currency,
-        tx_type,
-        "completed",
-        now,
+    await _insert_transaction(
+        conn,
+        user_id=user_id,
+        quest_id=quest_id,
+        amount=amount,
+        currency=currency,
+        tx_type=tx_type,
+        status="completed",
+        created_at=now,
     )
 
     logger.info(f"Credit {amount} {currency} to user {user_id}. New balance: {new_balance}")
@@ -280,19 +355,15 @@ async def debit(
     )
 
     # Ledger entry
-    await conn.execute(
-        """
-        INSERT INTO transactions (id, user_id, quest_id, amount, currency, type, status, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        """,
-        str(uuid.uuid4()),
-        user_id,
-        quest_id,
-        amount,
-        currency,
-        tx_type,
-        "completed",
-        now,
+    await _insert_transaction(
+        conn,
+        user_id=user_id,
+        quest_id=quest_id,
+        amount=amount,
+        currency=currency,
+        tx_type=tx_type,
+        status="completed",
+        created_at=now,
     )
 
     logger.info(f"Debit {amount} {currency} from user {user_id}. New balance: {new_balance}")
@@ -343,19 +414,15 @@ async def hold(
     )
 
     # Ledger entry with status='held' so we can find and release it later
-    await conn.execute(
-        """
-        INSERT INTO transactions (id, user_id, quest_id, amount, currency, type, status, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        """,
-        str(uuid.uuid4()),
-        user_id,
-        quest_id,
-        amount,
-        currency,
-        "hold",
-        "held",
-        now,
+    await _insert_transaction(
+        conn,
+        user_id=user_id,
+        quest_id=quest_id,
+        amount=amount,
+        currency=currency,
+        tx_type="hold",
+        status="held",
+        created_at=now,
     )
 
     logger.info(f"Hold {amount} {currency} for user {user_id} quest {quest_id}. New balance: {new_balance}")
@@ -388,10 +455,7 @@ async def release_hold(
     if not tx:
         raise ValueError(f"No active hold found for user {user_id} quest {quest_id}")
 
-    await conn.execute(
-        "UPDATE transactions SET status = 'completed' WHERE id = $1",
-        tx["id"],
-    )
+    await _update_transaction_status(conn, transaction_id=tx["id"], status="completed")
 
     logger.info(f"Released hold {tx['amount']} {currency} for user {user_id} quest {quest_id}")
     return _to_decimal(tx["amount"])
@@ -422,10 +486,7 @@ async def refund_hold(
     if not tx:
         return None
 
-    await conn.execute(
-        "UPDATE transactions SET status = 'refunded' WHERE id = $1",
-        tx["id"],
-    )
+    await _update_transaction_status(conn, transaction_id=tx["id"], status="refunded")
 
     # Credit the held amount back
     new_balance = await credit(
@@ -454,6 +515,7 @@ async def split_payment(
     currency: str = "RUB",
     quest_id: Optional[str] = None,
     fee_percent=None,
+    client_surcharge_amount=0,
 ) -> dict:
     """Split a quest payment: freelancer gets (100 - fee)%, platform gets fee%.
 
@@ -472,14 +534,17 @@ async def split_payment(
         currency: ISO currency code.
         quest_id: Associated quest for ledger reference.
         fee_percent: Platform fee %. Defaults to ``settings.PLATFORM_FEE_PERCENT``.
+        client_surcharge_amount: Extra client-funded payout charged above the base budget.
 
     Returns:
-        Dict with keys ``freelancer_amount``, ``platform_fee``, new
+        Dict with keys ``freelancer_amount``, ``platform_fee``,
+        ``client_surcharge_amount``, ``total_client_charge``, new
         ``freelancer_balance``, and ``platform_balance``.
     """
     _assert_in_transaction(conn)
 
     gross_amount = quantize_money(gross_amount)
+    client_surcharge_amount = quantize_money(client_surcharge_amount)
 
     if fee_percent is None:
         fee_percent = settings.PLATFORM_FEE_PERCENT
@@ -488,6 +553,8 @@ async def split_payment(
     _MAX_FEE_PERCENT = Decimal("30")
     if not (Decimal("0") <= fee_pct <= _MAX_FEE_PERCENT):
         raise ValueError(f"fee_percent must be in [0, {_MAX_FEE_PERCENT}], got {fee_percent}")
+    if client_surcharge_amount < 0:
+        raise ValueError("client_surcharge_amount must be non-negative")
 
     # Guard: platform user must exist to receive commission
     if fee_pct > 0:
@@ -502,7 +569,7 @@ async def split_payment(
 
     # Use Decimal for precise financial math
     platform_fee = quantize_money(gross_amount * fee_pct / Decimal("100"))
-    freelancer_amount = gross_amount - platform_fee  # NOT re-quantized — preserves fee + payout == gross invariant
+    base_freelancer_amount = gross_amount - platform_fee  # NOT re-quantized — preserves fee + payout == gross invariant
 
     # Try to release an existing escrow hold first;
     # fall back to a fresh debit if no hold exists.
@@ -538,15 +605,35 @@ async def split_payment(
             tx_type="expense",
         )
 
+    if client_surcharge_amount > 0:
+        client_balance = await debit(
+            conn,
+            user_id=client_id,
+            amount=client_surcharge_amount,
+            currency=currency,
+            quest_id=quest_id,
+            tx_type="urgent_bonus_charge",
+        )
+
     # Credit freelancer
     freelancer_balance = await credit(
         conn,
         user_id=freelancer_id,
-        amount=freelancer_amount,
+        amount=base_freelancer_amount,
         currency=currency,
         quest_id=quest_id,
         tx_type="income",
     )
+
+    if client_surcharge_amount > 0:
+        freelancer_balance = await credit(
+            conn,
+            user_id=freelancer_id,
+            amount=client_surcharge_amount,
+            currency=currency,
+            quest_id=quest_id,
+            tx_type="urgent_bonus",
+        )
 
     # Credit platform wallet (only if fee > 0)
     platform_balance: Optional[Decimal] = None
@@ -562,14 +649,17 @@ async def split_payment(
 
     logger.info(
         f"split_payment quest={quest_id}: gross={gross_amount} {currency}, "
-        f"freelancer={freelancer_id} +{freelancer_amount}, "
+        f"freelancer={freelancer_id} +{base_freelancer_amount} (+{client_surcharge_amount} surcharge), "
         f"platform +{platform_fee} (fee {fee_percent}%)"
     )
 
     return {
         "gross_amount": gross_amount,
         "fee_percent": fee_percent,
-        "freelancer_amount": freelancer_amount,
+        "freelancer_amount": base_freelancer_amount + client_surcharge_amount,
+        "base_freelancer_amount": base_freelancer_amount,
+        "client_surcharge_amount": client_surcharge_amount,
+        "total_client_charge": gross_amount + client_surcharge_amount,
         "platform_fee": platform_fee,
         "client_balance": client_balance,
         "freelancer_balance": freelancer_balance,
@@ -625,7 +715,8 @@ async def create_withdrawal(
         existing = await conn.fetchrow(
             """SELECT id, amount, currency, status
                FROM transactions
-               WHERE user_id = $1 AND idempotency_key = $2 AND type = 'withdrawal'""",
+               WHERE user_id = $1 AND idempotency_key = $2 AND type = 'withdrawal'
+               FOR UPDATE""",
             user_id,
             idempotency_key,
         )
@@ -659,20 +750,16 @@ async def create_withdrawal(
         wallet["id"],
     )
 
-    tx_id = str(uuid.uuid4())
-    await conn.execute(
-        """
-        INSERT INTO transactions (id, user_id, quest_id, amount, currency, type, status, idempotency_key, created_at)
-        VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)
-        """,
-        tx_id,
-        user_id,
-        amount,
-        currency,
-        "withdrawal",
-        "pending",
-        idempotency_key,
-        now,
+    tx_id = await _insert_transaction(
+        conn,
+        user_id=user_id,
+        quest_id=None,
+        amount=amount,
+        currency=currency,
+        tx_type="withdrawal",
+        status="pending",
+        idempotency_key=idempotency_key,
+        created_at=now,
     )
 
     logger.info(
