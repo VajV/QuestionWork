@@ -48,3 +48,67 @@ backend/uploads/
 *.dll
 *.so
 *.dylib
+
+# Local workspace artifacts — not part of the project
+/.tmp_pgdata/
+/.vscode/
+/.playwright-mcp/
+/playwright-audit*/
+/questDocsTest/
+/testsprite_tests/
+/backend/testsprite_tests/
+/frontend/testsprite_tests/
+/frontend/.next-[d]ev/
+/frontend/.vscode/
+/backend/nul
+
+# Local diagnostics / temporary files
+/_diag.txt
+/_write_plan.py
+/frontend/_diag.txt
+/login_body.json
+/test_output*.json
+/check_procs.ps1
+
+# Root-level transient txt/log artifacts
+/alembic_*.txt
+/backend_port.txt
+/backend_targeted_pytest.txt
+/badges_resp.txt
+/bcrypt_out.txt
+/build*.txt
+/chain_test_out.txt
+/debug*.txt
+/dev_log.txt
+/diag.txt
+/flush_result.txt
+/health_check.txt
+/http_check*.txt
+/invoice_backend_*.txt
+/login_*.txt
+/nb_*.txt
+/next_build_result.txt
+/p2.txt
+/p3.txt
+/page_check.txt
+/pg_log.txt
+/port*.txt
+/ports_check.txt
+/pre_run_check.txt
+/procs.txt
+/pytest*.txt
+/restart_check.txt
+/server_check.txt
+/test*.txt
+/ts*.txt
+/tx*.txt
+
+# Per-directory transient artifacts
+/backend/*.txt
+/frontend/*.txt
+
+# Local audit / report markdown files generated during dev
+/AUDIT_*.md
+/FIX_PLAN_*.md
+/FIX_ROADMAP.md
+/FULL_AUDIT_*.md
