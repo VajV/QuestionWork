@@ -1,29 +1,7 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono, Cinzel } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 import ClientAppShell from "@/components/ui/ClientAppShell";
-
-const inter = Inter({
-  subsets: ["latin", "cyrillic"],
-  weight: ["300", "400", "500", "600", "700", "900"],
-  variable: "--font-inter",
-  display: "swap",
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin", "cyrillic"],
-  weight: ["400", "500", "700"],
-  variable: "--font-jetbrains-mono",
-  display: "swap",
-});
-
-const cinzel = Cinzel({
-  subsets: ["latin"],
-  weight: ["400", "600", "700"],
-  variable: "--font-cinzel",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "QuestionWork | Найм IT-специалистов и исполнение контрактов",
@@ -43,7 +21,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ru" className={`${inter.variable} ${jetbrainsMono.variable} ${cinzel.variable}`} suppressHydrationWarning>
+    <html lang="ru" suppressHydrationWarning>
       <head>
         <Script src="/sw-cleanup.js" strategy="beforeInteractive" />
       </head>

@@ -19,6 +19,7 @@ import {
   getRaidQuests,
   applyToQuest,
   acceptTrainingQuest,
+  getApiErrorMessage,
   Quest,
   QuestApplicationCreate,
 } from "@/lib/api";
@@ -110,7 +111,7 @@ export default function QuestsPage() {
         setPage(fetchPage);
       } catch (err) {
         console.error("Ошибка загрузки квестов:", err);
-        setError("Не удалось загрузить квесты. Попробуйте позже.");
+        setError(getApiErrorMessage(err, "Не удалось загрузить квесты. Попробуйте позже."));
       } finally {
         setLoading(false);
       }
@@ -165,7 +166,7 @@ export default function QuestsPage() {
       loadQuests(true);
     } catch (err) {
       console.error("Ошибка принятия тренировки:", err);
-      setError("Не удалось принять тренировочный квест.");
+      setError(getApiErrorMessage(err, "Не удалось принять тренировочный квест."));
     }
   };
 
@@ -175,24 +176,30 @@ export default function QuestsPage() {
   const handleApplySubmit = async (data: QuestApplicationCreate) => {
     if (!selectedQuest) return;
 
-    const result = await applyToQuest(selectedQuest.id, data);
-    setAppliedQuests(new Set([...Array.from(appliedQuests), selectedQuest.id]));
-    setShowApplyModal(false);
-    setSelectedQuest(null);
+    try {
+      const result = await applyToQuest(selectedQuest.id, data);
+      setAppliedQuests(new Set([...Array.from(appliedQuests), selectedQuest.id]));
+      setShowApplyModal(false);
+      setSelectedQuest(null);
 
-    // Обновляем квест в списке
-    setQuests(
-      quests.map((q) =>
-        q.id === selectedQuest.id
-          ? {
-              ...q,
-              applications: q.applications.includes(result.application.freelancer_id)
-                ? q.applications
-                : [...q.applications, result.application.freelancer_id],
-            }
-          : q,
-      ),
-    );
+      // Обновляем квест в списке
+      setQuests(
+        quests.map((q) =>
+          q.id === selectedQuest.id
+            ? {
+                ...q,
+                applications: q.applications.includes(result.application.freelancer_id)
+                  ? q.applications
+                  : [...q.applications, result.application.freelancer_id],
+              }
+            : q,
+        ),
+      );
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Не удалось отправить отклик"));
+      setShowApplyModal(false);
+      setSelectedQuest(null);
+    }
   };
 
   /**

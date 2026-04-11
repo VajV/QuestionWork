@@ -125,9 +125,11 @@ async def get_user_reviews(
 @router.get("/check/{quest_id}", response_model=ReviewCheckResponse)
 async def check_review_status(
     quest_id: str,
+    request: Request,
     current_user: UserProfile = Depends(require_auth),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Check if the current user has already reviewed this quest."""
+    await check_rate_limit(get_client_ip(request), action="review_check", limit=30, window_seconds=60)
     reviewed = await review_service.has_reviewed(conn, quest_id, current_user.id)
     return ReviewCheckResponse(has_reviewed=reviewed)

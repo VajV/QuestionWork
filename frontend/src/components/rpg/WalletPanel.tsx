@@ -85,7 +85,6 @@ export default function WalletPanel() {
     setCurrency(getPreferredCurrency());
   }, []);
 
-  // Fetch balance + total earned
   const fetchWallet = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -96,15 +95,19 @@ export default function WalletPanel() {
       setBalanceBase(primary?.balance ?? 0);
       setBalanceBaseCurrency((primary?.currency as CurrencyCode) ?? "RUB");
       setTotalEarned(data.total_earned ?? 0);
-    } catch {
-      setError("Не удалось загрузить кошелёк");
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Не удалось загрузить кошелёк"));
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchWallet();
+    let cancelled = false;
+    fetchWallet().then(() => {
+      if (cancelled) return;
+    });
+    return () => { cancelled = true; };
   }, [fetchWallet]);
 
   // Fetch transactions on demand; after first load, button simply toggles visibility

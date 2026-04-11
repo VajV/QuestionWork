@@ -10,7 +10,7 @@ import Link from "next/link";
 import Header from "@/components/layout/Header";
 import EventStatusBadge from "@/components/events/EventStatusBadge";
 import EventLeaderboard from "@/components/events/EventLeaderboard";
-import { getEvent, joinEvent } from "@/lib/api";
+import { getEvent, joinEvent, getApiErrorMessage } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { GameEvent } from "@/types";
 import { ArrowLeft, Sparkles, Users, Clock, Trophy, Calendar } from "lucide-react";
@@ -54,7 +54,7 @@ export default function EventDetailPage() {
         setTimeLeft(formatTimeLeft(res.end_at));
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Ошибка загрузки");
+      setError(getApiErrorMessage(err, "Ошибка загрузки"));
     } finally {
       setLoading(false);
     }
@@ -80,11 +80,11 @@ export default function EventDetailPage() {
         prev ? { ...prev, participant_count: prev.participant_count + 1 } : prev
       );
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Ошибка";
+      const msg = getApiErrorMessage(err, "Ошибка");
       if (msg.includes("Already joined")) {
         setJoined(true);
       } else {
-        alert(msg);
+        setError(msg);
       }
     } finally {
       setJoinLoading(false);

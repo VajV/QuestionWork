@@ -79,11 +79,13 @@ async def open_dispute(
     summary="List my disputes",
 )
 async def list_my_disputes(
+    request: Request,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_user: UserProfile = Depends(require_auth),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
+    await check_rate_limit(get_client_ip(request), action="dispute_read", limit=60, window_seconds=60)
     return await dispute_service.list_my_disputes(conn, current_user.id, limit=limit, offset=offset)
 
 
@@ -94,9 +96,11 @@ async def list_my_disputes(
 )
 async def get_dispute(
     dispute_id: str,
+    request: Request,
     current_user: UserProfile = Depends(require_auth),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
+    await check_rate_limit(get_client_ip(request), action="dispute_read", limit=60, window_seconds=60)
     try:
         return await dispute_service.get_dispute(
             conn,
@@ -210,12 +214,14 @@ async def resolve_dispute(
     summary="Admin: list all disputes",
 )
 async def admin_list_disputes(
+    request: Request,
     status_filter: Optional[str] = Query(None, alias="status"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_user: UserProfile = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
+    await check_rate_limit(get_client_ip(request), action="admin_dispute_read", limit=60, window_seconds=60)
     return await dispute_service.admin_list_disputes(
         conn,
         status_filter=status_filter,

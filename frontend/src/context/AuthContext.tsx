@@ -26,6 +26,7 @@ import {
   getApiErrorStatus,
   refreshSession,
   setAccessToken,
+  STORAGE_KEY_USER,
 } from "@/lib/api";
 import {
   clearAdminTotpError as clearStoredAdminTotpError,
@@ -70,7 +71,6 @@ interface AuthContextType {
 // ============================================
 
 // const STORAGE_KEY_TOKEN = "questionwork_token";
-const STORAGE_KEY_USER = "questionwork_user";
 
 function clearStoredUser() {
   localStorage.removeItem(STORAGE_KEY_USER);

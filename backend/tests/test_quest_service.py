@@ -763,8 +763,8 @@ class TestConfirmQuestCompletion:
             mock_badge.check_and_award = AsyncMock(return_value=BadgeAwardResult(newly_earned=[]))
             result = await quest_service.confirm_quest_completion(conn, "quest_1", user)
 
-        # Verify transaction() was called at least once (money TX + post-commit notification TX)
-        assert conn.transaction.call_count >= 2
+        # Notifications now run inside the parent confirmation transaction.
+        assert conn.transaction.call_count == 1
 
         assert "confirmed" in result["message"].lower() or "reward" in result["message"].lower()
         assert result["xp_reward"] > 0

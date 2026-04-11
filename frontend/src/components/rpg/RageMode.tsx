@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "@/lib/motion";
 import type { AbilityInfo } from "@/lib/api";
-import { activateAbility } from "@/lib/api";
+import { activateAbility, getApiErrorMessage } from "@/lib/api";
 
 interface RageModeProps {
   ability: AbilityInfo;
@@ -47,7 +47,7 @@ export default function RageMode({ ability, onActivated }: RageModeProps) {
       const res = await activateAbility(ability.ability_id);
       onActivated?.(res.ability);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Ошибка активации");
+      setError(getApiErrorMessage(err, "Ошибка активации"));
     } finally {
       setLoading(false);
     }

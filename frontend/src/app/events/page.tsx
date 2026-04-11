@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Header from "@/components/layout/Header";
 import EventCard from "@/components/events/EventCard";
-import { getEvents, joinEvent } from "@/lib/api";
+import { getEvents, joinEvent, getApiErrorMessage } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { GameEvent, EventStatus } from "@/types";
 
@@ -53,7 +53,7 @@ export default function EventsPage() {
         setTotal(res.total);
         setHasMore(res.has_more);
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Ошибка загрузки");
+        setError(getApiErrorMessage(err, "Ошибка загрузки"));
       } finally {
         setLoading(false);
       }
@@ -78,7 +78,7 @@ export default function EventsPage() {
         setTotal(res.total);
         setHasMore(res.has_more);
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Ошибка загрузки");
+        setError(getApiErrorMessage(err, "Ошибка загрузки"));
       } finally {
         setLoading(false);
       }
@@ -101,11 +101,11 @@ export default function EventsPage() {
           )
         );
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Ошибка";
+        const msg = getApiErrorMessage(err, "Ошибка");
         if (msg.includes("Already joined")) {
           setJoinedIds((prev) => new Set(prev).add(eventId));
         } else {
-          alert(msg);
+          setError(msg);
         }
       } finally {
         setJoinLoading(null);

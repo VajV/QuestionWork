@@ -407,7 +407,7 @@ export default function MarketplacePage() {
     if (isAuthenticated && user?.role === "client") {
       getShortlistIds()
         .then((ids) => setShortlistedIds(new Set(ids)))
-        .catch(() => {});
+        .catch((e) => console.warn("Failed to load shortlist IDs", e));
     }
   }, [isAuthenticated, user?.role]);
 

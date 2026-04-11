@@ -282,8 +282,8 @@ async def resolve_dispute(
     _assert_in_transaction(conn)
     now = datetime.now(timezone.utc)
 
-    if resolution_type == ResolutionType.partial and not partial_percent:
-        raise ValueError("partial_percent is required for 'partial' resolution")
+    if resolution_type == ResolutionType.partial and (partial_percent is None or partial_percent <= 0 or partial_percent >= 100):
+        raise ValueError("partial_percent must be between 0 and 100 (exclusive) for 'partial' resolution")
 
     dispute = await conn.fetchrow(
         "SELECT id, quest_id, initiator_id, respondent_id, status FROM disputes WHERE id = $1 FOR UPDATE",

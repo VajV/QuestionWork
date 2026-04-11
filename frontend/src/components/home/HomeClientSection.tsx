@@ -540,7 +540,8 @@ export default function HomeClientSection() {
       try {
         const data = await getUserProfile(user.id);
         setProfile(data);
-      } catch {
+      } catch (e) {
+        console.warn("Failed to load profile, using auth context fallback", e);
         setProfile(user);
       } finally {
         setLoading(false);

@@ -6,7 +6,7 @@ import { motion } from "@/lib/motion";
 import Header from "@/components/layout/Header";
 import LevelBadge from "@/components/rpg/LevelBadge";
 import Button from "@/components/ui/Button";
-import { getAllUsers } from "@/lib/api";
+import { getAllUsers, getApiErrorMessage } from "@/lib/api";
 import type { PublicUserProfile, UserGrade } from "@/lib/api";
 import { Users, ChevronRight, Star, CheckCircle } from "lucide-react";
 
@@ -76,8 +76,8 @@ export default function UserDirectoryPage() {
       );
       setUsers(result.users);
       setHasMore(result.has_more);
-    } catch {
-      setError("Не удалось загрузить список пользователей.");
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Не удалось загрузить список пользователей."));
     } finally {
       setLoading(false);
     }

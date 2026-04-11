@@ -9,7 +9,7 @@ import { useAuth } from "@/context/AuthContext";
 import {
   getUserProfile,
   type PublicUserProfile,
-  type ApiError,
+  getApiErrorMessage,
 } from "@/lib/api";
 import Header from "@/components/layout/Header";
 import Card from "@/components/ui/Card";
@@ -78,7 +78,7 @@ function CompareInner() {
         candidate_count: profiles.length,
       });
     } catch (err) {
-      setError((err as ApiError).detail ?? "Не удалось загрузить профили.");
+      setError(getApiErrorMessage(err, "Не удалось загрузить профили."));
     } finally {
       setLoading(false);
     }

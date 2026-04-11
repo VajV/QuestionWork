@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -66,6 +66,16 @@ class SavedSearchCreate(BaseModel):
     search_type: str = Field(..., pattern="^(talent|quest)$")
     filters_json: Dict[str, Any] = Field(default_factory=dict)
     alert_enabled: bool = False
+
+    @field_validator("filters_json")
+    @classmethod
+    def validate_filters_json(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+        if len(v) > 20:
+            raise ValueError("filters_json must have ≤ 20 keys")
+        for val in v.values():
+            if isinstance(val, dict) and any(isinstance(vv, dict) for vv in val.values()):
+                raise ValueError("filters_json nesting depth must be ≤ 2")
+        return v
 
 
 class SavedSearchListResponse(BaseModel):

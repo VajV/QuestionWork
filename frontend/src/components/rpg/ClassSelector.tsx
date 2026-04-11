@@ -46,8 +46,8 @@ export default function ClassSelector({
         try {
           const info = await getMyClass();
           setMyClassInfo(info.has_class ? info : null);
-        } catch {
-          /* no class yet */
+        } catch (e) {
+          console.warn("Failed to load user class info", e);
         }
       }
     } catch (err: unknown) {

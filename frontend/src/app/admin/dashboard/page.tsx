@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "@/lib/motion";
 import {
@@ -90,7 +90,7 @@ export default function AdminDashboard() {
   const [bcLoading, setBcLoading] = useState(false);
   const [bcResult, setBcResult] = useState<string | null>(null);
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -102,16 +102,16 @@ export default function AdminDashboard() {
       setStats(s);
       setPendingData(p);
       setRecentLogs(logs.logs ?? []);
-    } catch {
-      setError("Не удалось загрузить данные. Проверьте права доступа.");
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Не удалось загрузить данные."));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     reload();
-  }, []);
+  }, [reload]);
 
   const handleCleanup = async () => {
     setCleanupLoading(true);
@@ -119,8 +119,8 @@ export default function AdminDashboard() {
     try {
       const r = await adminCleanupNotifications();
       setCleanupMsg(r.message);
-    } catch {
-      setCleanupMsg("Ошибка при очистке уведомлений.");
+    } catch (err) {
+      setCleanupMsg(getApiErrorMessage(err, "Ошибка при очистке уведомлений."));
     } finally {
       setCleanupLoading(false);
     }

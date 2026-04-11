@@ -519,7 +519,7 @@ async def apply_to_quest(
     # Wrap read + validation + write in a single transaction to prevent TOCTOU races
     async with conn.transaction():
         quest = await conn.fetchrow(
-            "SELECT id, status, client_id FROM quests WHERE id = $1 FOR SHARE", quest_id
+            "SELECT id, status, client_id, required_grade, required_portfolio, is_urgent FROM quests WHERE id = $1 FOR SHARE", quest_id
         )
         if not quest:
             raise ValueError("Quest not found")
@@ -617,7 +617,7 @@ async def assign_freelancer(
     async with conn.transaction():
         # Lock the quest row to prevent concurrent assignment
         quest = await conn.fetchrow(
-            "SELECT id, client_id, status FROM quests WHERE id = $1 FOR UPDATE", quest_id
+            "SELECT id, client_id, status, budget, currency, title FROM quests WHERE id = $1 FOR UPDATE", quest_id
         )
         if not quest:
             raise ValueError("Quest not found")
@@ -1063,7 +1063,13 @@ async def confirm_quest_completion(
                 Decimal(str(quest["budget"])) * Decimal(str(urgent_payout_bonus))
             )
 
+        from app.core.config import settings as _settings
+
         try:
+            # Use stored fee or fall back to settings default (raid quests store 0)
+            fee_snapshot = quest.get("platform_fee_percent")
+            if fee_snapshot is None or Decimal(str(fee_snapshot)) <= 0:
+                fee_snapshot = Decimal(_settings.PLATFORM_FEE_PERCENT)
             split = await wallet_service.split_payment(
                 conn,
                 client_id=quest["client_id"],
@@ -1071,7 +1077,7 @@ async def confirm_quest_completion(
                 gross_amount=quest["budget"],
                 currency=quest["currency"],
                 quest_id=quest_id,
-                fee_percent=quest.get("platform_fee_percent"),
+                fee_percent=fee_snapshot,
                 client_surcharge_amount=client_surcharge_amount,
             )
         except wallet_service.InsufficientFundsError as exc:
@@ -1123,16 +1129,43 @@ async def confirm_quest_completion(
         # 3b. Advance legendary quest chain progress (if quest belongs to a chain)
         chain_progress = await advance_chain_progress(conn, quest_id, quest["assigned_to"])
 
-        # 4. Collect notification data (sent AFTER commit to avoid holding TX)
-        _notif_quest_title = quest["title"]
-        _notif_freelancer_id = quest["assigned_to"]
-        _notif_client_id = quest["client_id"]
-        _notif_freelancer_amount = split["freelancer_amount"]
-        _notif_client_surcharge = split.get("client_surcharge_amount", Decimal("0"))
-        _notif_currency = quest["currency"]
-        _notif_xp_reward = xp_reward
-        _notif_quest_id = quest_id
-        _notif_newly_earned = list(award_result.newly_earned)
+        # 4. Send notifications inside the main transaction
+        await notification_service.create_notification(
+            conn,
+            user_id=quest["assigned_to"],
+            title="Quest Confirmed!",
+            message=(
+                f"Your quest '{quest['title']}' has been confirmed. "
+                f"You received {split['freelancer_amount']} {quest['currency']} "
+                f"and {xp_reward} XP."
+                + (
+                    f" Срочный бонус сверх бюджета: {split.get('client_surcharge_amount', Decimal('0'))} {quest['currency']}."
+                    if split.get("client_surcharge_amount", Decimal("0")) > 0
+                    else ""
+                )
+            ),
+            event_type="quest_confirmed",
+        )
+        await message_service.create_system_message(
+            conn,
+            quest_id,
+            "Контракт закрыт и подтверждён клиентом.",
+        )
+        await notification_service.create_notification(
+            conn,
+            user_id=quest["client_id"],
+            title="Оплата подтверждена",
+            message=f"Квест \"{quest['title']}\" завершён и оплачен",
+            event_type="quest_payment_confirmed",
+        )
+        for earned in award_result.newly_earned:
+            await notification_service.create_notification(
+                conn,
+                user_id=quest["assigned_to"],
+                title=f"Badge Earned: {earned.badge_name}",
+                message=earned.badge_description,
+                event_type="badge_earned",
+            )
 
         # 5. Class XP progression (if freelancer has a class)
         class_result = await class_service.add_class_xp(
@@ -1143,50 +1176,6 @@ async def confirm_quest_completion(
             required_portfolio=quest.get("required_portfolio", False),
         )
         await trust_score_service.refresh_trust_score(conn, quest["assigned_to"])
-
-    # ── Post-commit: fire notifications in a separate transaction ───
-    # NOTE: use a new transaction because the money TX has already committed.
-    # Both notification_service and message_service require is_in_transaction().
-    try:
-        async with conn.transaction():
-            await notification_service.create_notification(
-                conn,
-                user_id=_notif_freelancer_id,
-                title="Quest Confirmed!",
-                message=(
-                    f"Your quest '{_notif_quest_title}' has been confirmed. "
-                    f"You received {_notif_freelancer_amount} {_notif_currency} "
-                    f"and {_notif_xp_reward} XP."
-                    + (
-                        f" Срочный бонус сверх бюджета: {_notif_client_surcharge} {_notif_currency}."
-                        if _notif_client_surcharge > 0
-                        else ""
-                    )
-                ),
-                event_type="quest_confirmed",
-            )
-            await message_service.create_system_message(
-                conn,
-                _notif_quest_id,
-                "Контракт закрыт и подтверждён клиентом.",
-            )
-            await notification_service.create_notification(
-                conn,
-                user_id=_notif_client_id,
-                title="Оплата подтверждена",
-                message=f"Квест \"{_notif_quest_title}\" завершён и оплачен",
-                event_type="quest_payment_confirmed",
-            )
-            for earned in _notif_newly_earned:
-                await notification_service.create_notification(
-                    conn,
-                    user_id=_notif_freelancer_id,
-                    title=f"Badge Earned: {earned.badge_name}",
-                    message=earned.badge_description,
-                    event_type="badge_earned",
-                )
-    except Exception:
-        logger.warning("Post-commit notifications failed (transaction already committed)", exc_info=True)
 
     logger.info(
         f"Quest {quest_id} confirmed. Freelancer {freelancer_row['username']}: "
@@ -1242,7 +1231,7 @@ async def cancel_quest(
     """Cancel a quest. Only the client-owner can cancel."""
     async with conn.transaction():
         quest = await conn.fetchrow(
-            "SELECT id, client_id, status FROM quests WHERE id = $1 FOR UPDATE", quest_id
+            "SELECT id, client_id, status, assigned_to, title, currency FROM quests WHERE id = $1 FOR UPDATE", quest_id
         )
         if not quest:
             raise ValueError("Quest not found")
@@ -1283,6 +1272,16 @@ async def cancel_quest(
             note="Quest cancelled",
             created_at=now,
         )
+
+        # Notify assigned freelancer about cancellation
+        if quest["assigned_to"]:
+            await notification_service.create_notification(
+                conn,
+                user_id=quest["assigned_to"],
+                title="Квест отменён",
+                message=f"Клиент отменил квест «{quest['title']}».",
+                event_type="quest_cancelled",
+            )
 
     return {
         "message": "Quest cancelled successfully",
@@ -1654,9 +1653,8 @@ async def complete_training_quest(
             conn, current_user.id, "quest_completed", badge_event_data
         )
 
-    # Post-commit notification
-    try:
-        async with conn.transaction():
+        # Notification inside main transaction
+        try:
             await notification_service.create_notification(
                 conn,
                 user_id=current_user.id,
@@ -1664,8 +1662,8 @@ async def complete_training_quest(
                 message=f"Вы выполнили тренировочный квест «{quest['title']}» и получили {xp_reward} XP.",
                 event_type="training_quest_completed",
             )
-    except Exception:
-        logger.warning("Training quest notification failed", exc_info=True)
+        except Exception:
+            logger.warning("Training quest notification failed", exc_info=True)
 
     updated_quest = await conn.fetchrow("SELECT * FROM quests WHERE id = $1", quest_id)
     return {

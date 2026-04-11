@@ -47,7 +47,7 @@ const API_BASE_URL = resolveApiBaseUrl();
 
 // In-memory access token (do not persist access tokens in localStorage)
 let ACCESS_TOKEN: string | null = null;
-const STORAGE_KEY_USER = "questionwork_user";
+export const STORAGE_KEY_USER = "questionwork_user";
 const REFRESH_RESULT_TTL_MS = 3000;
 
 import { triggerLogout } from "@/lib/authEvents";
@@ -864,28 +864,48 @@ export async function refreshSession(): Promise<TokenResponse | null> {
       const timeoutId = setTimeout(() => controller.abort(), 5000);
 
       try {
-        const refreshResp = await fetch(`${API_BASE_URL}/auth/refresh`, {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-        });
-        if (!refreshResp.ok) {
-          lastRefreshResult = null;
-          lastRefreshResolvedAt = Date.now();
-          return null;
-        }
+        const MAX_RETRIES = 2;
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            const refreshResp = await fetch(`${API_BASE_URL}/auth/refresh`, {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              signal: controller.signal,
+            });
 
-        const refreshed = (await refreshResp.json()) as TokenResponse;
-        setAccessToken(refreshed.access_token);
-        lastRefreshResult = refreshed;
-        lastRefreshResolvedAt = Date.now();
-        return refreshed;
-      } catch (error) {
-        if (isAbortError(error)) {
-          lastRefreshResult = null;
-          lastRefreshResolvedAt = Date.now();
-          return null;
+            // Retry on 429/503 (transient)
+            if ((refreshResp.status === 429 || refreshResp.status === 503) && attempt < MAX_RETRIES) {
+              await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+              continue;
+            }
+
+            if (!refreshResp.ok) {
+              lastRefreshResult = null;
+              lastRefreshResolvedAt = Date.now();
+              return null;
+            }
+
+            const refreshed = (await refreshResp.json()) as TokenResponse;
+            setAccessToken(refreshed.access_token);
+            lastRefreshResult = refreshed;
+            lastRefreshResolvedAt = Date.now();
+            return refreshed;
+          } catch (error) {
+            if (isAbortError(error)) {
+              lastRefreshResult = null;
+              lastRefreshResolvedAt = Date.now();
+              return null;
+            }
+            // Retry on network errors
+            if (attempt < MAX_RETRIES) {
+              await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+              continue;
+            }
+            lastRefreshResult = null;
+            lastRefreshResolvedAt = Date.now();
+            return null;
+          }
         }
         lastRefreshResult = null;
         lastRefreshResolvedAt = Date.now();

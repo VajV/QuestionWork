@@ -37,6 +37,36 @@ interface Props {
   onClose: () => void;
 }
 
+interface SpeechRecognitionAlternativeLike {
+  transcript: string;
+}
+
+interface SpeechRecognitionResultLike {
+  0: SpeechRecognitionAlternativeLike;
+}
+
+interface SpeechRecognitionEventLike {
+  results: ArrayLike<SpeechRecognitionResultLike>;
+}
+
+interface SpeechRecognitionInstance {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
+
+type SpeechRecognitionWindow = Window & {
+  SpeechRecognition?: SpeechRecognitionConstructor;
+  webkitSpeechRecognition?: SpeechRecognitionConstructor;
+};
+
 export default function VoiceIntroOverlay({ section, onClose }: Props) {
   const meta = SECTION_META[section];
   const { state, error, isSending, messages, analyserRef, start, sendMessage, stop } =
@@ -46,21 +76,25 @@ export default function VoiceIntroOverlay({ section, onClose }: Props) {
   const [isListening, setIsListening] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const handleSendRef = useRef<() => void>(() => undefined);
 
   // Auto-start intro when overlay mounts
   useEffect(() => {
     start(section);
     return () => stop();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [section]);
+  }, [section, start, stop]);
 
   // Scroll chat to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const handleClose = useCallback(() => {
+    recognitionRef.current?.stop();
+    stop();
+    onClose();
+  }, [stop, onClose]);
 
   // Escape to close
   useEffect(() => {
@@ -69,14 +103,7 @@ export default function VoiceIntroOverlay({ section, onClose }: Props) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleClose = useCallback(() => {
-    recognitionRef.current?.stop();
-    stop();
-    onClose();
-  }, [stop, onClose]);
+  }, [handleClose]);
 
   const handleSend = useCallback(async () => {
     const text = inputText.trim();
@@ -102,19 +129,20 @@ export default function VoiceIntroOverlay({ section, onClose }: Props) {
       setIsListening(false);
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
-    if (!SR) return; // browser doesn't support speech recognition
+    const speechWindow = window as SpeechRecognitionWindow;
+    const SpeechRecognitionCtor =
+      speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) return; // browser doesn't support speech recognition
 
-    const recognition = new SR();
+    const recognition = new SpeechRecognitionCtor();
     recognition.lang = "ru-RU";
     recognition.interimResults = true;
     recognition.continuous = false;
     recognitionRef.current = recognition;
 
-    recognition.onresult = (event: { results: SpeechRecognitionResultList }) => {
+    recognition.onresult = (event) => {
       const transcript = Array.from(event.results)
-        .map((r: SpeechRecognitionResult) => r[0].transcript)
+        .map((result) => result[0].transcript)
         .join("");
       setInputText(transcript);
     };

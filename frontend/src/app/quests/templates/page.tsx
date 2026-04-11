@@ -16,6 +16,7 @@ import {
   deleteTemplate,
   updateTemplate,
   createQuestFromTemplate,
+  getApiErrorMessage,
   QuestTemplate,
   UpdateTemplatePayload,
 } from "@/lib/api";
@@ -96,8 +97,8 @@ export default function TemplatesPage() {
       const res = await getTemplates(50, 0);
       setTemplates(res.templates);
       setTotal(res.total);
-    } catch {
-      setError("Не удалось загрузить шаблоны");
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Не удалось загрузить шаблоны"));
     } finally {
       setLoading(false);
     }
@@ -161,8 +162,8 @@ export default function TemplatesPage() {
       });
       await load();
       setTimeout(() => setSuccess(null), 3000);
-    } catch {
-      setError("Ошибка при создании шаблона");
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Ошибка при создании шаблона"));
     } finally {
       setFormLoading(false);
     }
@@ -220,7 +221,7 @@ export default function TemplatesPage() {
       await load();
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
-      setError((err as { detail?: string }).detail || "Не удалось обновить шаблон");
+      setError(getApiErrorMessage(err, "Не удалось обновить шаблон"));
     } finally {
       setFormLoading(false);
     }
@@ -250,8 +251,8 @@ export default function TemplatesPage() {
       setTotal((t) => t - 1);
       setSuccess("Шаблон удалён");
       setTimeout(() => setSuccess(null), 3000);
-    } catch {
-      setError("Ошибка при удалении");
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Ошибка при удалении"));
     }
   };
 
@@ -271,8 +272,8 @@ export default function TemplatesPage() {
         flow: "instant-create",
       });
       router.push(`/quests/${quest.id}`);
-    } catch {
-      setError("Не удалось создать квест из шаблона");
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Не удалось создать квест из шаблона"));
     }
   };
 

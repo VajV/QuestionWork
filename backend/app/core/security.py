@@ -169,29 +169,30 @@ async def create_refresh_token(user_id: str) -> Tuple[str, int]:
     if client:
         await client.set(key, user_id, ex=expires_seconds)
     else:
-        # Evict expired tokens first, then LRU if still at capacity
-        if len(_IN_MEMORY_REFRESH_STORE) >= _IN_MEMORY_MAX_TOKENS:
-            now_ts = int(datetime.now(timezone.utc).timestamp())
-            expired_keys = [
-                k for k, v in _IN_MEMORY_REFRESH_STORE.items()
-                if v.get("exp", 0) <= now_ts
-            ]
-            for k in expired_keys:
-                _IN_MEMORY_REFRESH_STORE.pop(k, None)
-            if expired_keys:
-                logger.info("Pruned %d expired refresh tokens.", len(expired_keys))
-            # If still at capacity after pruning expired, evict LRU
+        async with _refresh_store_lock:
+            # Evict expired tokens first, then LRU if still at capacity
             if len(_IN_MEMORY_REFRESH_STORE) >= _IN_MEMORY_MAX_TOKENS:
-                evict_count = _IN_MEMORY_MAX_TOKENS // 4
-                for _ in range(min(evict_count, len(_IN_MEMORY_REFRESH_STORE))):
-                    _IN_MEMORY_REFRESH_STORE.popitem(last=False)
-                logger.warning(
-                    "In-memory refresh token store at capacity (%d). Evicted %d oldest tokens.",
-                    _IN_MEMORY_MAX_TOKENS,
-                    evict_count,
-                )
-        exp_ts = int((datetime.now(timezone.utc) + expires).timestamp())
-        _IN_MEMORY_REFRESH_STORE[token] = {"user_id": user_id, "exp": exp_ts}
+                now_ts = int(datetime.now(timezone.utc).timestamp())
+                expired_keys = [
+                    k for k, v in _IN_MEMORY_REFRESH_STORE.items()
+                    if v.get("exp", 0) <= now_ts
+                ]
+                for k in expired_keys:
+                    _IN_MEMORY_REFRESH_STORE.pop(k, None)
+                if expired_keys:
+                    logger.info("Pruned %d expired refresh tokens.", len(expired_keys))
+                # If still at capacity after pruning expired, evict LRU
+                if len(_IN_MEMORY_REFRESH_STORE) >= _IN_MEMORY_MAX_TOKENS:
+                    evict_count = _IN_MEMORY_MAX_TOKENS // 4
+                    for _ in range(min(evict_count, len(_IN_MEMORY_REFRESH_STORE))):
+                        _IN_MEMORY_REFRESH_STORE.popitem(last=False)
+                    logger.warning(
+                        "In-memory refresh token store at capacity (%d). Evicted %d oldest tokens.",
+                        _IN_MEMORY_MAX_TOKENS,
+                        evict_count,
+                    )
+            exp_ts = int((datetime.now(timezone.utc) + expires).timestamp())
+            _IN_MEMORY_REFRESH_STORE[token] = {"user_id": user_id, "exp": exp_ts}
 
     return token, expires_seconds
 
@@ -209,16 +210,17 @@ async def verify_refresh_token(token: str) -> Optional[str]:
         except Exception:
             return None
     else:
-        entry = _IN_MEMORY_REFRESH_STORE.get(token)
-        if not entry:
-            return None
-        if entry.get("exp", 0) < int(datetime.now(timezone.utc).timestamp()):
-            # expired
-            _IN_MEMORY_REFRESH_STORE.pop(token, None)
-            return None
-        # LRU touch: move to end so it's evicted last
-        _IN_MEMORY_REFRESH_STORE.move_to_end(token)
-        return entry.get("user_id")
+        async with _refresh_store_lock:
+            entry = _IN_MEMORY_REFRESH_STORE.get(token)
+            if not entry:
+                return None
+            if entry.get("exp", 0) < int(datetime.now(timezone.utc).timestamp()):
+                # expired
+                _IN_MEMORY_REFRESH_STORE.pop(token, None)
+                return None
+            # LRU touch: move to end so it's evicted last
+            _IN_MEMORY_REFRESH_STORE.move_to_end(token)
+            return entry.get("user_id")
 
 
 async def revoke_refresh_token(token: str) -> None:
@@ -233,7 +235,8 @@ async def revoke_refresh_token(token: str) -> None:
         except Exception:
             logger.warning("Failed to delete refresh token from Redis")
     else:
-        _IN_MEMORY_REFRESH_STORE.pop(token, None)
+        async with _refresh_store_lock:
+            _IN_MEMORY_REFRESH_STORE.pop(token, None)
 
 
 async def rotate_refresh_token(old_token: str) -> Tuple[Optional[str], Optional[str], int]:

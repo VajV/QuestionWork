@@ -64,7 +64,7 @@ async def create_review(
 
     # 1. Check quest status
     quest = await conn.fetchrow(
-        "SELECT id, client_id, assigned_to, status FROM quests WHERE id = $1",
+        "SELECT id, client_id, assigned_to, status FROM quests WHERE id = $1 FOR SHARE",
         quest_id,
     )
     if not quest:
@@ -137,8 +137,10 @@ async def create_review(
                 new_xp_to_next, reviewer_id,
             )
         else:
+            # Fallback: reviewer row disappeared between check and update; still apply XP with level-up
+            logger.warning("Reviewer %s not found for XP grant; applying raw increment", reviewer_id)
             await conn.execute(
-                "UPDATE users SET xp = xp + $1 WHERE id = $2",
+                "UPDATE users SET xp = xp + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
                 xp_bonus, reviewer_id,
             )
 

@@ -208,7 +208,7 @@ class UserCreate(BaseModel):
     def prevent_admin_registration(cls, v: UserRoleEnum) -> UserRoleEnum:
         """Never allow self-registration as admin."""
         if v == UserRoleEnum.admin:
-            return UserRoleEnum.freelancer
+            raise ValueError("Admin registration is not allowed")
         return v
 
     @field_validator("password")

@@ -24,9 +24,15 @@ interface QuestChatProps {
 }
 
 const POLL_INTERVAL_MS = 10_000;
-const WS_BASE_URL =
-  (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_WS_URL) ||
-  "ws://127.0.0.1:8001";
+const WS_BASE_URL = (() => {
+  if (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_WS_URL) {
+    return process.env.NEXT_PUBLIC_WS_URL;
+  }
+  const apiUrl =
+    (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_API_URL) || "http://127.0.0.1:8001/api/v1";
+  const origin = apiUrl.replace(/\/api\/v1\/?$/, "");
+  return origin.replace(/^https:/, "wss:").replace(/^http:/, "ws:");
+})();
 
 export default function QuestChat({ questId, currentUserId }: QuestChatProps) {
   const [messages, setMessages] = useState<QuestMessage[]>([]);

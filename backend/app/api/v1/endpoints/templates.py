@@ -118,12 +118,14 @@ async def create_template(
 
 @router.get("/", response_model=TemplateListResponse)
 async def list_templates(
+    request: Request,
     limit: int = Query(default=50, le=100),
     offset: int = Query(default=0, ge=0),
     current_user: UserProfile = Depends(require_auth),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """List current user's templates."""
+    await check_rate_limit(get_client_ip(request), action="template_read", limit=60, window_seconds=60)
     result = await template_service.list_templates(
         conn, current_user.id, limit=limit, offset=offset,
     )
@@ -133,10 +135,12 @@ async def list_templates(
 @router.get("/{template_id}", response_model=TemplateResponse)
 async def get_template(
     template_id: str,
+    request: Request,
     current_user: UserProfile = Depends(require_auth),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Get a specific template."""
+    await check_rate_limit(get_client_ip(request), action="template_read", limit=60, window_seconds=60)
     result = await template_service.get_template(conn, template_id, current_user.id)
     if not result:
         raise HTTPException(status_code=404, detail="Шаблон не найден")

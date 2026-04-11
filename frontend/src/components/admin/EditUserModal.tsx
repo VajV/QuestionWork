@@ -170,8 +170,8 @@ export default function EditUserModal({ userId, onClose, onUpdated }: Props) {
       setBio(data.bio || "");
       setCharacterClass(data.character_class || "");
       setNewClassId(data.character_class || "");
-    } catch {
-      flash("Не удалось загрузить пользователя", "err");
+    } catch (err) {
+      flash(getApiErrorMessage(err, "Не удалось загрузить пользователя"), "err");
     } finally {
       setLoading(false);
     }

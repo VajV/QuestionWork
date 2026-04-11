@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AnalyticsEventIngest(BaseModel):
@@ -15,6 +15,16 @@ class AnalyticsEventIngest(BaseModel):
     source: Optional[str] = Field(None, max_length=100)
     path: Optional[str] = Field(None, max_length=500)
     properties: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("properties")
+    @classmethod
+    def validate_properties(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+        if len(v) > 30:
+            raise ValueError("properties must have ≤ 30 keys")
+        import json as _json
+        if len(_json.dumps(v, default=str)) > 4096:
+            raise ValueError("properties payload must be ≤ 4 KB")
+        return v
     # Client-side timestamp; server-side as fallback
     timestamp: Optional[datetime] = None
 

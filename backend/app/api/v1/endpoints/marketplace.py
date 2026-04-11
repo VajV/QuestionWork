@@ -38,8 +38,10 @@ async def get_talent_market(
 @router.get("/guilds/{guild_slug}", response_model=GuildDetailResponse)
 async def get_guild_detail(
     guild_slug: str,
+    request: Request,
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
+    await check_rate_limit(get_client_ip(request), action="guild_detail", limit=60, window_seconds=60)
     try:
         return GuildDetailResponse(**(await marketplace_service.get_guild_public_profile(conn, guild_slug)))
     except ValueError as exc:

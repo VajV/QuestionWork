@@ -13,7 +13,7 @@ import {
   Flame,
   Pencil,
 } from "lucide-react";
-import { adminGetQuests } from "@/lib/api";
+import { adminGetQuests, getApiErrorMessage } from "@/lib/api";
 import type { Quest, QuestStatus } from "@/lib/api";
 import EditQuestModal from "@/components/admin/EditQuestModal";
 import GuildStatusStrip from "@/components/ui/GuildStatusStrip";
@@ -62,8 +62,8 @@ export default function AdminQuestsPage() {
         const r = await adminGetQuests(p, PAGE_SIZE, status || undefined, q || undefined);
         setQuests(r.quests);
         setTotal(r.total);
-      } catch {
-        setError("Не удалось загрузить квесты.");
+      } catch (err) {
+        setError(getApiErrorMessage(err, "Не удалось загрузить квесты."));
       } finally {
         setLoading(false);
       }

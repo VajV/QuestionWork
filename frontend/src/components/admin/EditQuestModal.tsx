@@ -101,8 +101,8 @@ export default function EditQuestModal({ questId, onClose, onUpdated }: Props) {
       setRequiredGrade(data.required_grade);
       setIsUrgent(data.is_urgent);
       setRequiredPortfolio(data.required_portfolio);
-    } catch {
-      flash("Не удалось загрузить квест", "err");
+    } catch (err) {
+      flash(getApiErrorMessage(err, "Не удалось загрузить квест"), "err");
     } finally {
       setLoading(false);
     }

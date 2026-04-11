@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import asyncpg
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.api.deps import require_auth, _USER_SAFE_COLUMNS
 from app.db.session import get_db_connection
@@ -27,6 +27,15 @@ class ProfileUpdateRequest(BaseModel):
     availability_status: Optional[str] = Field(None, max_length=32)
     portfolio_summary: Optional[str] = Field(None, max_length=500)
     portfolio_links: Optional[List[str]] = Field(None, max_length=8)
+
+    @field_validator("skills")
+    @classmethod
+    def validate_skill_items(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is not None:
+            for s in v:
+                if len(s) > 50:
+                    raise ValueError("Each skill must be ≤ 50 characters")
+        return v
 
 
 class AvatarUploadResponse(BaseModel):
@@ -261,6 +270,7 @@ def _build_public_profile_payload(profile: UserProfile, proof: dict) -> dict:
 
 @router.get("/me", response_model=UserProfile)
 async def get_my_profile(
+    request: Request,
     current_user: UserProfile = Depends(require_auth),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
@@ -269,6 +279,7 @@ async def get_my_profile(
     P1-14 FIX: refreshUser must fetch from this endpoint (not the public /users/{id})
     to keep is_banned, email, and other private fields up-to-date on the client.
     """
+    await check_rate_limit(get_client_ip(request), action="user_read", limit=60, window_seconds=60)
     row = await conn.fetchrow(
         f"SELECT {_USER_SAFE_COLUMNS} FROM users WHERE id = $1",
         current_user.id,
@@ -411,6 +422,7 @@ async def complete_onboarding(
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Mark onboarding as completed and award the Recruit badge."""
+    await check_rate_limit(get_client_ip(request), action="onboarding_complete", limit=5, window_seconds=60)
     user_id = current_user.id
     async with conn.transaction():
         await conn.execute(
@@ -557,7 +569,7 @@ async def get_user_profile(
     if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Пользователь с ID {user_id} не найден",
+            detail="Пользователь не найден",
         )
     proof = await _fetch_proof_fields(conn, user_id)
     profile = row_to_user_profile(row)

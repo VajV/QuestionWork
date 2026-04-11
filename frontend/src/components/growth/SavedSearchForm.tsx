@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { createSavedSearch, type SavedSearch, type SavedSearchCreate } from "@/lib/api";
+import { createSavedSearch, getApiErrorMessage, type SavedSearch, type SavedSearchCreate } from "@/lib/api";
 
 interface Props {
   searchType: "talent" | "quest";
@@ -31,7 +31,7 @@ export default function SavedSearchForm({ searchType, filtersJson, onSaved }: Pr
       setSaved(true);
       onSaved?.(result);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Не удалось сохранить поиск";
+      const msg = getApiErrorMessage(err, "Не удалось сохранить поиск");
       setError(msg);
     } finally {
       setLoading(false);

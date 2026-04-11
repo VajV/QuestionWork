@@ -12,7 +12,7 @@ import {
   Download,
   AlertCircle,
 } from "lucide-react";
-import { adminGetLogs } from "@/lib/api";
+import { adminGetLogs, getApiErrorMessage } from "@/lib/api";
 import type { AdminLogEntry, AdminLogValue, AdminLogsResponse } from "@/types";
 import GuildStatusStrip from "@/components/ui/GuildStatusStrip";
 import WorldPanel from "@/components/ui/WorldPanel";
@@ -42,8 +42,8 @@ export default function AdminLogsPage() {
       try {
         const r = await adminGetLogs(p, PAGE_SIZE, admin || undefined);
         setData(r);
-      } catch {
-        setError("Не удалось загрузить логи.");
+      } catch (err) {
+        setError(getApiErrorMessage(err, "Не удалось загрузить логи."));
       } finally {
         setLoading(false);
       }

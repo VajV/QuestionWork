@@ -11,7 +11,7 @@ import {
   Pencil,
   Ban,
 } from "lucide-react";
-import { adminGetUsers } from "@/lib/api";
+import { adminGetUsers, getApiErrorMessage } from "@/lib/api";
 import type { AdminUserRow, AdminUsersResponse } from "@/types";
 import EditUserModal from "@/components/admin/EditUserModal";
 import ErrorBoundary from "@/components/ui/ErrorBoundary";
@@ -54,8 +54,8 @@ export default function AdminUsersPage() {
     try {
       const r = await adminGetUsers(p, PAGE_SIZE, role || undefined, q || undefined);
       setData(r);
-    } catch {
-      setError("Не удалось загрузить список пользователей.");
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Не удалось загрузить список пользователей."));
     } finally {
       setLoading(false);
     }

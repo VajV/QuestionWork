@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "@/lib/motion";
-import { createQuest, UserGrade } from "@/lib/api";
+import { createQuest, getApiErrorMessage, UserGrade } from "@/lib/api";
 import type { ApiError } from "@/lib/api";
 import { safeParseMoney } from "@/lib/money";
 import Button from "@/components/ui/Button";
@@ -272,12 +272,7 @@ export default function QuestCreationWizard({ initialData, templateMeta }: Props
       setSuccess(true);
       setTimeout(() => router.push(`/quests/${quest.id}`), 1500);
     } catch (err) {
-      let msg = "Не удалось создать квест.";
-      const apiError = err as Partial<ApiError>;
-      if (typeof apiError.detail === "string" && apiError.detail.trim()) msg = apiError.detail;
-      else if (typeof apiError.message === "string" && apiError.message.trim()) msg = apiError.message;
-      else if (err instanceof Error) msg = err.message;
-      setError(msg);
+      setError(getApiErrorMessage(err, "Не удалось создать квест."));
     } finally {
       setLoading(false);
     }

@@ -115,7 +115,7 @@ export default function QuestDetailPage() {
   // Load active abilities for the ability XP indicator (non-blocking)
   useEffect(() => {
     if (!isAuthenticated || user?.role === "client") return;
-    getAbilities().then(setAbilities).catch(() => {});
+    getAbilities().then(setAbilities).catch((e) => console.warn("Failed to load abilities", e));
   }, [isAuthenticated, user?.role]);
 
   const showMessage = useCallback((msg: string) => {
@@ -167,7 +167,8 @@ export default function QuestDetailPage() {
           try {
             const party = await getRaidParty(questId);
             setRaidParty(party);
-          } catch {
+          } catch (e) {
+            console.warn("Failed to load raid party", e);
             setRaidParty(null);
           }
         }
@@ -177,7 +178,8 @@ export default function QuestDetailPage() {
           try {
             const detail = await getChainDetail(data.chain_id);
             setChainDetail(detail);
-          } catch {
+          } catch (e) {
+            console.warn("Failed to load chain detail", e);
             setChainDetail(null);
           }
         }
@@ -443,7 +445,9 @@ export default function QuestDetailPage() {
       try {
         const historyData = await getQuestHistory(quest.id);
         setHistory(historyData.history);
-      } catch {}
+      } catch (e) {
+        console.warn("Failed to refresh quest history after publish", e);
+      }
     } catch (_err) {
       showMessage("❌ Ошибка при публикации черновика");
     } finally {

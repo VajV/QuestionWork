@@ -297,13 +297,13 @@ export default function ProfilePage() {
       }
 
       const playerCardsPromise = user.role === "freelancer"
-        ? getPlayerCardDrops().catch(() => null)
+        ? getPlayerCardDrops().catch((err) => { console.warn("Failed to load player cards:", err); return null; })
         : Promise.resolve(null);
 
       const [profile, badgeData, artifactCabinet, playerCards] = await Promise.all([
         getUserProfile(user.id),
         getMyBadges(),
-        getUserArtifacts().catch(() => null),
+        getUserArtifacts().catch((err) => { console.warn("Failed to load artifacts:", err); return null; }),
         playerCardsPromise,
       ]);
 
@@ -313,7 +313,8 @@ export default function ProfilePage() {
         try {
           const currentClassInfo = await getMyClass();
           classInfo = currentClassInfo.has_class ? currentClassInfo : null;
-        } catch {
+        } catch (e) {
+          console.warn("Failed to load class info", e);
           classInfo = null;
         }
       }

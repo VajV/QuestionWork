@@ -13,7 +13,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "@/lib/motion";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
-import { getQuests, Quest } from "@/lib/api";
+import { getQuests, getApiErrorMessage, Quest } from "@/lib/api";
 import Header from "@/components/layout/Header";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
@@ -72,8 +72,8 @@ export default function ClientDashboardPage() {
     try {
       const res = await getQuests(1, 100, { userId: user.id });
       setQuests(res.quests);
-    } catch {
-      setError("Не удалось загрузить данные");
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Не удалось загрузить данные"));
     } finally {
       setLoading(false);
     }

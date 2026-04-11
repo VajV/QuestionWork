@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { getEventLeaderboard } from "@/lib/api";
+import { getEventLeaderboard, getApiErrorMessage } from "@/lib/api";
 import { EventLeaderboardResponse } from "@/types";
 import { Trophy, Medal, Award } from "lucide-react";
 
@@ -38,7 +38,7 @@ export default function EventLeaderboard({ eventId }: EventLeaderboardProps) {
       const res = await getEventLeaderboard(eventId, { limit: 50 });
       setData(res);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Ошибка загрузки");
+      setError(getApiErrorMessage(err, "Ошибка загрузки"));
     } finally {
       setLoading(false);
     }

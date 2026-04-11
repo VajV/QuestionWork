@@ -120,7 +120,8 @@ export default function NotificationsPage() {
     setPrefsSaving(true);
     try {
       await updateNotificationPreferences(updated);
-    } catch {
+    } catch (e) {
+      console.warn("Preference update failed, reverting", e);
       setPrefs(prefs); // revert on failure
     } finally {
       setPrefsSaving(false);

@@ -11,6 +11,7 @@ import Card from "@/components/ui/Card";
 import { useAuth } from "@/context/AuthContext";
 import {
   completeOnboarding,
+  getApiErrorMessage,
   getClasses,
   updateMyProfile,
   uploadMyAvatar,
@@ -184,7 +185,7 @@ export default function OnboardingWizard({ user }: Props) {
       try {
         await persistProfileAndFinish();
       } catch (unknownError: unknown) {
-        setError(unknownError instanceof Error ? unknownError.message : "Ошибка сохранения онбординга");
+        setError(getApiErrorMessage(unknownError, "Ошибка сохранения онбординга"));
         setSaving(false);
         return;
       }
@@ -223,7 +224,8 @@ export default function OnboardingWizard({ user }: Props) {
       await completeOnboarding();
       await refreshUser();
       router.push("/quests");
-    } catch {
+    } catch (e) {
+      console.warn("Onboarding skip failed", e);
       router.push("/quests");
     }
   };

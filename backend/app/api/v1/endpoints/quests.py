@@ -242,10 +242,12 @@ async def publish_quest(
 @router.get("/{quest_id}/history")
 async def get_quest_history(
     quest_id: str,
-    current_user: Optional[UserProfile] = Depends(get_optional_user),
+    request: Request,
+    current_user: UserProfile = Depends(require_auth),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Получить историю смен статусов по контракту."""
+    await _quest_read_rate_limit(request)
     try:
         history = await quest_service.get_quest_status_history(conn, quest_id, current_user)
     except ValueError as e:
@@ -486,10 +488,12 @@ async def cancel_quest(
 @router.get("/{quest_id}/applications")
 async def get_quest_applications(
     quest_id: str,
+    request: Request,
     current_user: UserProfile = Depends(require_auth),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Получить список откликов на квест"""
+    await _quest_read_rate_limit(request)
     try:
         result = await quest_service.get_quest_applications(
             conn, quest_id, current_user
@@ -751,21 +755,25 @@ async def complete_raid_quest(
 
 @router.get("/chains/list", response_model=ChainListResponse)
 async def list_quest_chains(
+    request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=50),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """List all legendary quest chains."""
+    await _quest_read_rate_limit(request)
     return await quest_service.list_quest_chains(conn, page=page, page_size=page_size)
 
 
 @router.get("/chains/{chain_id}", response_model=ChainDetailResponse)
 async def get_chain_detail(
     chain_id: str,
+    request: Request,
     current_user: UserProfile | None = Depends(get_optional_user),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Get full chain detail with steps, quests, and optional user progress."""
+    await _quest_read_rate_limit(request)
     user_id = current_user.id if current_user else None
     try:
         return await quest_service.get_chain_detail(conn, chain_id, user_id=user_id)
@@ -795,9 +803,11 @@ async def create_quest_chain(
 
 @router.get("/chains/my-progress")
 async def get_my_chain_progress(
+    request: Request,
     current_user: UserProfile = Depends(require_auth),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Get current user's progress across all chains."""
+    await _quest_read_rate_limit(request)
     progress = await quest_service.get_user_chain_progress_list(conn, current_user.id)
     return {"progress": [p.model_dump() for p in progress]}

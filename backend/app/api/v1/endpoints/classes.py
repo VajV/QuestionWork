@@ -34,9 +34,11 @@ router = APIRouter(prefix="/classes", tags=["Classes"])
 
 @router.get("/", response_model=ClassListResponse)
 async def list_classes(
+    request: Request,
     current_user: UserProfile = Depends(require_auth),
 ):
     """List all available character classes."""
+    await check_rate_limit(get_client_ip(request), action="class_read", limit=60, window_seconds=60)
     return class_service.list_classes(
         user_level=current_user.level,
         current_class=current_user.character_class,
@@ -45,10 +47,12 @@ async def list_classes(
 
 @router.get("/me", response_model=UserClassInfo)
 async def get_my_class(
+    request: Request,
     current_user: UserProfile = Depends(require_auth),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Get current user's class info and progression."""
+    await check_rate_limit(get_client_ip(request), action="class_read", limit=60, window_seconds=60)
     info = await class_service.get_user_class_info(conn, current_user.id)
     if info is None:
         return class_service.build_empty_user_class_info()
@@ -117,10 +121,12 @@ async def reset_class(
 
 @router.get("/perks", response_model=PerkTreeResponse)
 async def get_perk_tree(
+    request: Request,
     current_user: UserProfile = Depends(require_auth),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Get user's perk tree for their current class."""
+    await check_rate_limit(get_client_ip(request), action="class_read", limit=60, window_seconds=60)
     try:
         return await class_service.get_user_perk_tree(conn, current_user.id)
     except ValueError as e:
@@ -150,10 +156,12 @@ async def unlock_perk(
 
 @router.get("/abilities", response_model=list[AbilityInfo])
 async def get_abilities(
+    request: Request,
     current_user: UserProfile = Depends(require_auth),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     """Get all abilities for user's current class with status."""
+    await check_rate_limit(get_client_ip(request), action="class_read", limit=60, window_seconds=60)
     return await class_service.get_user_abilities(conn, current_user.id)
 
 

@@ -17,6 +17,7 @@ import {
   adminGetTransactions,
   adminApproveWithdrawal,
   adminRejectWithdrawal,
+  getApiErrorMessage,
 } from "@/lib/api";
 import type { AdminTransaction, AdminTransactionsResponse } from "@/types";
 import GuildStatusStrip from "@/components/ui/GuildStatusStrip";
@@ -65,8 +66,8 @@ export default function AdminWithdrawalsPage() {
             ? await adminGetPendingWithdrawals(p, PAGE_SIZE)
             : await adminGetTransactions(p, PAGE_SIZE);
         setData(r);
-      } catch {
-        setError("Не удалось загрузить транзакции.");
+      } catch (err) {
+        setError(getApiErrorMessage(err, "Не удалось загрузить транзакции."));
       } finally {
         setLoading(false);
       }
@@ -94,8 +95,8 @@ export default function AdminWithdrawalsPage() {
       await adminApproveWithdrawal(txId);
       showToast("success", `Вывод ${txId.slice(0, 12)}… одобрен`);
       load(page, tab);
-    } catch {
-      showToast("error", "Ошибка при одобрении вывода.");
+    } catch (err) {
+      showToast("error", getApiErrorMessage(err, "Ошибка при одобрении вывода."));
     } finally {
       setActionLoading(false);
       setActionId(null);
@@ -110,8 +111,8 @@ export default function AdminWithdrawalsPage() {
       await adminRejectWithdrawal(txId, rejectReason.trim());
       showToast("success", `Вывод ${txId.slice(0, 12)}… отклонён`);
       load(page, tab);
-    } catch {
-      showToast("error", "Ошибка при отклонении вывода.");
+    } catch (err) {
+      showToast("error", getApiErrorMessage(err, "Ошибка при отклонении вывода."));
     } finally {
       setActionLoading(false);
       setActionId(null);

@@ -6,7 +6,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { motion } from "@/lib/motion";
-import { AbilityInfo, activateAbility, getAbilities } from "@/lib/api";
+import { AbilityInfo, activateAbility, getAbilities, getApiErrorMessage } from "@/lib/api";
 import { Zap, Clock, Lock, CheckCircle, Sparkles } from "lucide-react";
 
 // Human-readable effect labels
@@ -172,7 +172,7 @@ export default function AbilityPanel({ initialAbilities, onActivated }: AbilityP
     setLoading(true);
     getAbilities()
       .then(setAbilities)
-      .catch((e) => setError(e instanceof Error ? e.message : "Ошибка загрузки"))
+      .catch((e) => setError(getApiErrorMessage(e, "Ошибка загрузки")))
       .finally(() => setLoading(false));
   }, [initialAbilities]);
 
@@ -187,7 +187,7 @@ export default function AbilityPanel({ initialAbilities, onActivated }: AbilityP
       setToast({ msg: `${res.ability.name_ru} активирована!`, ok: true });
       onActivated?.(res.ability);
     } catch (e: unknown) {
-      setToast({ msg: e instanceof Error ? e.message : "Ошибка", ok: false });
+      setToast({ msg: getApiErrorMessage(e, "Ошибка"), ok: false });
     } finally {
       setActivatingId(null);
       setTimeout(() => setToast(null), 3500);

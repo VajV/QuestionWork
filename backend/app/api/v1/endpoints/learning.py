@@ -6,10 +6,11 @@ POST /learning/chat         — interactive chat with voice response
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.api.deps import require_auth
 from app.core.ratelimit import check_rate_limit, get_client_ip
 from app.services.learning_voice_service import (
     VALID_SECTIONS,
@@ -39,7 +40,7 @@ class LearningChatRequest(BaseModel):
 
 
 @router.post("/voice-intro")
-async def voice_intro(body: VoiceIntroRequest, request: Request) -> Response:
+async def voice_intro(body: VoiceIntroRequest, request: Request, _=Depends(require_auth)) -> Response:
     """
     Serve intro audio for the requested learning section.
     Audio is generated once and cached in memory for 30 minutes.
@@ -57,7 +58,7 @@ async def voice_intro(body: VoiceIntroRequest, request: Request) -> Response:
 
 
 @router.post("/chat")
-async def learning_chat(body: LearningChatRequest, request: Request) -> StreamingResponse:
+async def learning_chat(body: LearningChatRequest, request: Request, _=Depends(require_auth)) -> StreamingResponse:
     """
     Interactive voice chat about the learning section.
     AI reply text is returned in the X-Response-Text header alongside the audio body.

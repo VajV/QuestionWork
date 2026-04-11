@@ -20,10 +20,12 @@ router = APIRouter(prefix="/saved-searches", tags=["Saved Searches"])
 
 @router.get("/", response_model=SavedSearchListResponse)
 async def list_saved_searches(
+    request: Request,
     current_user: UserProfile = Depends(require_auth),
     conn: asyncpg.Connection = Depends(get_db_connection),
 ) -> SavedSearchListResponse:
     """Return all saved searches for the authenticated user."""
+    await check_rate_limit(get_client_ip(request), action="saved_search_read", limit=60, window_seconds=60)
     rows = await saved_searches_service.list_saved_searches(conn, current_user.id)
     items = [
         SavedSearch(

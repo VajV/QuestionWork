@@ -37,28 +37,29 @@ async def create_saved_search(
     alert_enabled: bool = False,
 ) -> asyncpg.Record:
     """Create a new saved search. Raises ValueError if limit exceeded."""
-    count = await conn.fetchval(
-        "SELECT COUNT(*) FROM saved_searches WHERE user_id = $1", user_id
-    )
-    if (count or 0) >= MAX_SAVED_SEARCHES_PER_USER:
-        raise ValueError(
-            f"Saved search limit reached ({MAX_SAVED_SEARCHES_PER_USER} per user)"
+    async with conn.transaction():
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM saved_searches WHERE user_id = $1", user_id
         )
+        if (count or 0) >= MAX_SAVED_SEARCHES_PER_USER:
+            raise ValueError(
+                f"Saved search limit reached ({MAX_SAVED_SEARCHES_PER_USER} per user)"
+            )
 
-    row = await conn.fetchrow(
-        """
-        INSERT INTO saved_searches
-            (user_id, name, search_type, filters_json, alert_enabled, created_at)
-        VALUES ($1, $2, $3, $4::jsonb, $5, NOW())
-        RETURNING id, user_id, name, search_type, filters_json, alert_enabled,
-                  last_alerted_at, created_at
-        """,
-        user_id,
-        name,
-        search_type,
-        json.dumps(filters_json),
-        alert_enabled,
-    )
+        row = await conn.fetchrow(
+            """
+            INSERT INTO saved_searches
+                (user_id, name, search_type, filters_json, alert_enabled, created_at)
+            VALUES ($1, $2, $3, $4::jsonb, $5, NOW())
+            RETURNING id, user_id, name, search_type, filters_json, alert_enabled,
+                      last_alerted_at, created_at
+            """,
+            user_id,
+            name,
+            search_type,
+            json.dumps(filters_json),
+            alert_enabled,
+        )
     return row
 
 
