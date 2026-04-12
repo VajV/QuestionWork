@@ -18,6 +18,7 @@ import Header from "@/components/layout/Header";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import GuildStatusStrip from "@/components/ui/GuildStatusStrip";
+import { WeeklyChallengesWidget } from "@/components/rpg/WeeklyChallengesWidget";
 import QuestStatusBadge from "@/components/quests/QuestStatusBadge";
 import { formatMoney as _fmt } from "@/lib/format";
 import {
@@ -227,6 +228,11 @@ export default function ClientDashboardPage() {
               color="text-emerald-400"
             />
           </div>
+
+          {/* Weekly Challenges — freelancers only */}
+          {user?.role === "freelancer" && (
+            <WeeklyChallengesWidget />
+          )}
 
           {/* Active quests */}
           <section className="rpg-card p-6">

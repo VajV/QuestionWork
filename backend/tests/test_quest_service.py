@@ -51,7 +51,11 @@ def _mock_refresh_trust_score():
         "app.services.quest_service.trust_score_service.refresh_trust_score",
         new=AsyncMock(return_value=None),
     ):
-        yield
+        with patch("app.services.quest_service.challenge_service") as mock_ch:
+            mock_ch.increment_challenge_progress = AsyncMock(return_value=None)
+            with patch("app.services.quest_service.referral_service") as mock_ref:
+                mock_ref.grant_referral_rewards = AsyncMock(return_value=None)
+                yield
 
 
 def _make_user(role="client", user_id="user_client", grade=GradeEnum.novice, is_banned=False):
@@ -427,6 +431,88 @@ class TestApplyToQuest:
 
         with pytest.raises(ValueError, match="status"):
             await quest_service.apply_to_quest(conn, "quest_1", data, user)
+
+
+class TestInviteFreelancerToQuest:
+    @pytest.mark.asyncio
+    async def test_invite_success_creates_notification(self):
+        conn = _make_conn()
+        conn.fetchrow.side_effect = [
+            {
+                "id": "quest_1",
+                "client_id": "user_client",
+                "client_username": "test_client",
+                "title": "Test Quest",
+                "status": "open",
+                "assigned_to": None,
+            },
+            {
+                "id": "user_fl",
+                "username": "test_freelancer",
+                "role": "freelancer",
+                "is_banned": False,
+            },
+        ]
+        conn.fetchval.side_effect = [None, None]
+        user = _make_user("client")
+
+        with patch(
+            "app.services.quest_service.notification_service.create_notification",
+            new=AsyncMock(return_value=None),
+        ) as create_notification:
+            result = await quest_service.invite_freelancer_to_quest(conn, "quest_1", "user_fl", user)
+
+        assert result.quest_id == "quest_1"
+        assert result.freelancer_id == "user_fl"
+        assert result.already_sent is False
+        create_notification.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_invite_rejects_non_owner(self):
+        conn = _make_conn()
+        conn.fetchrow.return_value = {
+            "id": "quest_1",
+            "client_id": "other_client",
+            "client_username": "other_client",
+            "title": "Test Quest",
+            "status": "open",
+            "assigned_to": None,
+        }
+        user = _make_user("client")
+
+        with pytest.raises(PermissionError, match="owner or admin"):
+            await quest_service.invite_freelancer_to_quest(conn, "quest_1", "user_fl", user)
+
+    @pytest.mark.asyncio
+    async def test_invite_is_idempotent_when_notification_exists(self):
+        conn = _make_conn()
+        conn.fetchrow.side_effect = [
+            {
+                "id": "quest_1",
+                "client_id": "user_client",
+                "client_username": "test_client",
+                "title": "Test Quest",
+                "status": "open",
+                "assigned_to": None,
+            },
+            {
+                "id": "user_fl",
+                "username": "test_freelancer",
+                "role": "freelancer",
+                "is_banned": False,
+            },
+        ]
+        conn.fetchval.side_effect = [None, "notif_existing"]
+        user = _make_user("client")
+
+        with patch(
+            "app.services.quest_service.notification_service.create_notification",
+            new=AsyncMock(return_value=None),
+        ) as create_notification:
+            result = await quest_service.invite_freelancer_to_quest(conn, "quest_1", "user_fl", user)
+
+        assert result.already_sent is True
+        create_notification.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

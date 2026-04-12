@@ -5,10 +5,18 @@ import secrets
 import asyncpg
 
 
+def _assert_in_transaction(conn: asyncpg.Connection) -> None:
+    if not conn.is_in_transaction():
+        raise RuntimeError(
+            "This shortlist_service function must be called inside an explicit DB transaction."
+        )
+
+
 async def add_to_shortlist(
     conn: asyncpg.Connection, client_id: str, freelancer_id: str,
 ) -> dict:
     """Add a freelancer to the client's shortlist. Idempotent."""
+    _assert_in_transaction(conn)
     shortlist_id = f"sl_{secrets.token_hex(8)}"
     row = await conn.fetchrow(
         """
@@ -31,6 +39,7 @@ async def remove_from_shortlist(
     conn: asyncpg.Connection, client_id: str, freelancer_id: str,
 ) -> bool:
     """Remove a freelancer from the client's shortlist."""
+    _assert_in_transaction(conn)
     result = await conn.execute(
         "DELETE FROM shortlists WHERE client_id = $1 AND freelancer_id = $2",
         client_id, freelancer_id,
@@ -70,3 +79,13 @@ async def get_shortlisted_ids(
         client_id,
     )
     return [r["freelancer_id"] for r in rows]
+
+
+async def get_shortlist_count(
+    conn: asyncpg.Connection, client_id: str,
+) -> int:
+    """Return the shortlist size for a client. Optimized single-value query."""
+    count = await conn.fetchval(
+        "SELECT COUNT(*) FROM shortlists WHERE client_id = $1", client_id,
+    )
+    return int(count or 0)

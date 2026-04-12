@@ -136,6 +136,137 @@ export interface AdminLogsResponse {
   page_size: number;
 }
 
+export interface AdminOperationFeedEntry {
+  command_id: string;
+  job_id: string | null;
+  action: string;
+  command_status: string;
+  job_kind: string | null;
+  job_status: string | null;
+  actor_admin_id: string | null;
+  actor_user_id: string | null;
+  queue_name: string | null;
+  request_id: string | null;
+  trace_id: string | null;
+  submitted_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface AdminOperationsFeedResponse {
+  items: AdminOperationFeedEntry[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_more: boolean;
+}
+
+export interface AdminRuntimeHeartbeatEntry {
+  id: string;
+  runtime_kind: string;
+  runtime_id: string;
+  hostname: string;
+  pid: number;
+  started_at: string;
+  last_seen_at: string;
+  meta_json: Record<string, unknown> | Array<unknown> | null;
+  queue_name: string | null;
+  heartbeat_interval_seconds: number;
+  stale_after_seconds: number;
+  started_age_seconds: number;
+  seconds_since_last_seen: number;
+  is_stale: boolean;
+  is_leader: boolean | null;
+  lease_ttl_seconds: number | null;
+  lease_expires_in_seconds: number | null;
+}
+
+export interface AdminRuntimeHeartbeatsResponse {
+  generated_at: string;
+  active_only: boolean;
+  total: number;
+  stale_total: number;
+  active_workers: number;
+  active_schedulers: number;
+  stale_workers: number;
+  stale_schedulers: number;
+  leader_runtime_id: string | null;
+  leader_count: number;
+  runtimes: AdminRuntimeHeartbeatEntry[];
+}
+
+export interface AdminJobAttempt {
+  id: string;
+  attempt_no: number;
+  worker_id: string;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  error_code: string | null;
+  error_text: string | null;
+  duration_ms: number | null;
+  external_ref: string | null;
+  created_at: string;
+}
+
+export interface AdminJobCommandSummary {
+  id: string;
+  command_kind: string;
+  status: string;
+  request_id: string | null;
+  trace_id: string | null;
+  requested_by_admin_id: string | null;
+  requested_by_user_id: string | null;
+  submitted_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface AdminJobStatusResponse {
+  id: string;
+  kind: string;
+  queue_name: string;
+  status: string;
+  priority: number;
+  dedupe_key: string | null;
+  payload_json: Record<string, unknown> | Array<unknown> | null;
+  scheduled_for: string;
+  available_at: string;
+  enqueued_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  last_heartbeat_at: string | null;
+  last_error_code: string | null;
+  last_error: string | null;
+  last_enqueue_error: string | null;
+  queue_publish_attempts: number;
+  attempt_count: number;
+  max_attempts: number;
+  lock_token: string | null;
+  locked_by: string | null;
+  trace_id: string | null;
+  request_id: string | null;
+  created_by_user_id: string | null;
+  created_by_admin_id: string | null;
+  command_id: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  created_at: string;
+  updated_at: string;
+  command: AdminJobCommandSummary | null;
+  attempts: AdminJobAttempt[];
+}
+
+export interface AdminJobReplayResponse {
+  job_id: string;
+  previous_status: string;
+  status: string;
+  queue_name: string;
+  enqueued: boolean;
+  message: string;
+  enqueue_error: string | null;
+}
+
 /** Result from PATCH /admin/withdrawals/:id/approve */
 export interface WithdrawalApproveResult {
   transaction_id: string;

@@ -249,6 +249,29 @@ async def test_scheduler_schedules_withdrawal_auto_approve_jobs_when_flag_enable
 
 
 @pytest.mark.asyncio
+async def test_scheduler_schedules_due_lifecycle_jobs_when_flag_enabled(monkeypatch):
+    conn = object()
+    enqueue = AsyncMock()
+    schedule = AsyncMock(return_value=3)
+
+    monkeypatch.setattr(scheduler_runtime.settings, "EMAILS_ENABLED", True)
+    monkeypatch.setattr(scheduler_runtime.settings, "LIFECYCLE_DELIVERY_JOBS_ENABLED", True)
+    monkeypatch.setattr(scheduler_runtime.settings, "LIFECYCLE_DELIVERY_BATCH_LIMIT", 15)
+    monkeypatch.setattr(scheduler_runtime.runtime_heartbeat_repository, "upsert_runtime_heartbeat", AsyncMock())
+    monkeypatch.setattr(scheduler_runtime.runtime_heartbeat_repository, "delete_stale_runtimes", AsyncMock(return_value=0))
+    monkeypatch.setattr(scheduler_runtime.withdrawal_runtime_service, "schedule_auto_approve_jobs", AsyncMock(return_value=0))
+    monkeypatch.setattr(scheduler_runtime.email_runtime_service, "schedule_email_outbox_jobs", AsyncMock(return_value=0))
+    monkeypatch.setattr(scheduler_runtime.lifecycle_runtime_service, "schedule_due_lifecycle_jobs", schedule)
+    monkeypatch.setattr(scheduler_runtime.job_repository, "find_orphaned_queued_jobs", AsyncMock(return_value=[]))
+    monkeypatch.setattr(scheduler_runtime.job_repository, "find_due_retry_jobs", AsyncMock(return_value=[]))
+    monkeypatch.setattr(scheduler_runtime.job_repository, "find_stale_running_jobs", AsyncMock(return_value=[]))
+
+    await scheduler_runtime.scheduler_tick(conn, enqueue_callable=enqueue, scheduler_id="host:100", now=datetime.now(timezone.utc))
+
+    schedule.assert_awaited_once_with(conn, batch_limit=15)
+
+
+@pytest.mark.asyncio
 async def test_scheduler_lease_allows_only_one_active_scheduler_until_expiry(monkeypatch):
     conn = object()
     now = datetime.now(timezone.utc)
@@ -296,6 +319,42 @@ async def test_scheduler_lease_allows_only_one_active_scheduler_until_expiry(mon
 
     assert third == {"orphaned_enqueued": 0, "retry_enqueued": 0, "rescued_running": 0}
     assert tick.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_scheduler_runs_lifecycle_scan_once_per_interval_for_leader(monkeypatch):
+    conn = object()
+    now = datetime.now(timezone.utc)
+    redis = FakeRedisLease()
+    tick = AsyncMock(return_value={"orphaned_enqueued": 0, "retry_enqueued": 0, "rescued_running": 0})
+    run_scan = AsyncMock()
+
+    monkeypatch.setattr(scheduler_runtime.settings, "LIFECYCLE_SCAN_ENABLED", True)
+    monkeypatch.setattr(scheduler_runtime.settings, "LIFECYCLE_SCAN_INTERVAL_SECONDS", 120)
+    monkeypatch.setattr(scheduler_runtime, "run_lifecycle_scan", run_scan)
+
+    first = await scheduler_runtime.run_scheduler_iteration(
+        conn,
+        redis=redis,
+        enqueue_callable=AsyncMock(),
+        scheduler_id="host:100",
+        lease_token="lease-1",
+        now=now,
+        tick_callable=tick,
+    )
+    second = await scheduler_runtime.run_scheduler_iteration(
+        conn,
+        redis=redis,
+        enqueue_callable=AsyncMock(),
+        scheduler_id="host:100",
+        lease_token="lease-1",
+        now=now,
+        tick_callable=tick,
+    )
+
+    assert first == {"orphaned_enqueued": 0, "retry_enqueued": 0, "rescued_running": 0}
+    assert second == {"orphaned_enqueued": 0, "retry_enqueued": 0, "rescued_running": 0}
+    run_scan.assert_awaited_once_with(conn)
 
 
 @pytest.mark.asyncio

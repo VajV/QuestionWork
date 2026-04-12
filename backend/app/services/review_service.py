@@ -15,7 +15,7 @@ import asyncpg
 
 from app.core.cache import redis_cache, invalidate_cache_scope
 from app.core.rewards import check_level_up, calculate_xp_to_next
-from app.services import badge_service, trust_score_service
+from app.services import badge_service, trust_score_service, challenge_service
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +180,13 @@ async def create_review(
             )
             for b in reviewee_result.newly_earned:
                 badges_earned.append({"user_id": reviewee_id, "badge_name": b.badge_name, "badge_icon": b.badge_icon})
+            # Weekly challenge: earn_five_star (for the reviewee who received 5 stars)
+            try:
+                await challenge_service.increment_challenge_progress(
+                    conn, user_id=reviewee_id, challenge_type="earn_five_star"
+                )
+            except Exception:
+                logger.exception("Weekly challenge (five_star) update failed for user %s", reviewee_id)
     except (KeyError, TypeError, AttributeError, LookupError) as exc:
         logger.warning("Badge check after review failed (non-critical): %s", exc, exc_info=True)
 

@@ -66,6 +66,7 @@ const ReviewModal = dynamic(() => import("@/components/quests/ReviewModal"), { s
 const DisputeModal = dynamic(() => import("@/components/quests/DisputeModal"), { ssr: false });
 const RecommendedTalentRail = dynamic(() => import("@/components/marketplace/RecommendedTalentRail"), { ssr: false });
 const RepeatHireCard = dynamic(() => import("@/components/growth/RepeatHireCard"), { ssr: false });
+const MilestonesPanel = dynamic(() => import("@/components/quests/MilestonesPanel").then(m => ({ default: m.MilestonesPanel })), { ssr: false });
 
 export default function QuestDetailPage() {
   const router = useRouter();
@@ -1457,12 +1458,22 @@ export default function QuestDetailPage() {
                 <div className="rpg-card p-6 md:p-8">
                   <RecommendedTalentRail
                     questId={quest.id}
+                    questTitle={quest.title}
                     skills={quest.skills}
                     limit={3}
                     title="Подходящие исполнители"
                   />
                 </div>
               </Card>
+            )}
+
+            {/* Milestone escrow panel — visible to quest participants when assigned+ */}
+            {(isClient || isAssigned) && ["assigned", "in_progress", "completed", "revision_requested", "confirmed"].includes(quest.status) && (
+              <MilestonesPanel
+                questId={quest.id}
+                role={isClient ? "client" : "freelancer"}
+                currency={quest.currency}
+              />
             )}
 
             {/* Повторный найм — после подтверждения контракта */}

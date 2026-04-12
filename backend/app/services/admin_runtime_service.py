@@ -9,8 +9,10 @@ from typing import Any
 import asyncpg
 
 from app.core.config import settings
+from app.jobs.arq import create_arq_pool, enqueue_job_message
 from app.jobs.enums import RUNTIME_KIND_SCHEDULER, RUNTIME_KIND_WORKER
-from app.repositories import runtime_heartbeat_repository
+from app.repositories import command_repository, job_repository, runtime_heartbeat_repository
+from app.services import admin_service
 
 
 def _normalize_json(value: Any) -> dict[str, Any] | list[Any] | None:
@@ -381,4 +383,98 @@ async def prune_runtime_heartbeats(
         "stale_only": stale_only,
         "retention_seconds": effective_retention_seconds,
         "deleted_count": deleted_count,
+    }
+
+
+async def requeue_job(
+    conn: asyncpg.Connection,
+    *,
+    job_id: str,
+    admin_id: str,
+    reason: str | None = None,
+    request_ip: str | None = None,
+) -> dict[str, Any] | None:
+    now = datetime.now(timezone.utc)
+
+    async with conn.transaction():
+        job = await conn.fetchrow(
+            "SELECT * FROM background_jobs WHERE id = $1 FOR UPDATE",
+            job_id,
+        )
+        if job is None:
+            return None
+
+        previous_status = str(job["status"])
+        if previous_status not in {"failed", "dead_letter"}:
+            raise ValueError("Only failed or dead-letter jobs can be requeued manually")
+
+        replayed = await job_repository.requeue_terminal_job(
+            conn,
+            job_id=job_id,
+            available_at=now,
+        )
+        if replayed is None:
+            raise ValueError("Job could not be requeued")
+
+        if replayed.get("command_id") is not None:
+            await command_repository.reset_command_for_replay(
+                conn,
+                str(replayed["command_id"]),
+            )
+
+        await admin_service.log_admin_action(
+            conn,
+            admin_id=admin_id,
+            action="runtime_requeue_job",
+            target_type="background_job",
+            target_id=str(replayed["id"]),
+            old_value={
+                "status": previous_status,
+                "attempt_count": int(job.get("attempt_count") or 0),
+                "queue_name": job.get("queue_name"),
+                "last_error_code": job.get("last_error_code"),
+            },
+            new_value={
+                "status": "retry_scheduled",
+                "queue_name": replayed.get("queue_name"),
+                "reason": reason,
+            },
+            ip_address=request_ip,
+            command_id=str(replayed["command_id"]) if replayed.get("command_id") is not None else None,
+            job_id=str(replayed["id"]),
+            request_id=replayed.get("request_id"),
+            trace_id=replayed.get("trace_id"),
+        )
+
+    enqueue_error: str | None = None
+    enqueued = False
+    redis = None
+    try:
+        redis = await create_arq_pool()
+        await enqueue_job_message(
+            redis,
+            job_id=job_id,
+            queue_name=str(replayed["queue_name"]),
+            trace_id=replayed.get("trace_id"),
+            request_id=replayed.get("request_id"),
+        )
+        async with conn.transaction():
+            await job_repository.record_enqueue_success(conn, job_id)
+        enqueued = True
+    except Exception as exc:
+        enqueue_error = str(exc)
+        async with conn.transaction():
+            await job_repository.record_enqueue_failure(conn, job_id, error_text=enqueue_error)
+    finally:
+        if redis is not None:
+            await redis.close(close_connection_pool=True)
+
+    return {
+        "job_id": str(replayed["id"]),
+        "previous_status": previous_status,
+        "status": "retry_scheduled",
+        "queue_name": str(replayed["queue_name"]),
+        "enqueued": enqueued,
+        "enqueue_error": enqueue_error,
+        "message": "Job requeued and published to the worker queue" if enqueued else "Job requeued; scheduler will retry enqueue automatically",
     }

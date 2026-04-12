@@ -133,7 +133,7 @@ class TestGetNotifications:
 class TestMarkAsRead:
     @pytest.mark.asyncio
     async def test_marks_owned_notification_as_read(self):
-        conn = _make_conn(in_txn=False)
+        conn = _make_conn(in_txn=True)
         conn.execute = AsyncMock(return_value="UPDATE 1")
 
         updated = await mark_as_read(conn, "notif_abc", "user1")
@@ -143,7 +143,7 @@ class TestMarkAsRead:
 
     @pytest.mark.asyncio
     async def test_returns_false_if_not_found_or_not_owner(self):
-        conn = _make_conn(in_txn=False)
+        conn = _make_conn(in_txn=True)
         conn.execute = AsyncMock(return_value="UPDATE 0")
 
         updated = await mark_as_read(conn, "notif_xyz", "user1")
@@ -152,7 +152,7 @@ class TestMarkAsRead:
 
     @pytest.mark.asyncio
     async def test_returns_false_if_already_read(self):
-        conn = _make_conn(in_txn=False)
+        conn = _make_conn(in_txn=True)
         conn.execute = AsyncMock(return_value="UPDATE 0")
 
         updated = await mark_as_read(conn, "notif_abc", "user1")
@@ -167,7 +167,7 @@ class TestMarkAsRead:
 class TestMarkAllAsRead:
     @pytest.mark.asyncio
     async def test_marks_all_as_read_returns_count(self):
-        conn = _make_conn(in_txn=False)
+        conn = _make_conn(in_txn=True)
         conn.execute = AsyncMock(return_value="UPDATE 5")
 
         count = await mark_all_as_read(conn, "user1")
@@ -176,7 +176,7 @@ class TestMarkAllAsRead:
 
     @pytest.mark.asyncio
     async def test_returns_zero_if_nothing_to_update(self):
-        conn = _make_conn(in_txn=False)
+        conn = _make_conn(in_txn=True)
         conn.execute = AsyncMock(return_value="UPDATE 0")
 
         count = await mark_all_as_read(conn, "user1")

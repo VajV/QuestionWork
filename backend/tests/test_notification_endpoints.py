@@ -11,8 +11,11 @@ from fastapi.testclient import TestClient
 # ──────────────────────────────────────────────────
 
 class _MockConn:
+    def __init__(self):
+        self._in_transaction = False
+
     def is_in_transaction(self):
-        return False
+        return self._in_transaction
 
     async def fetchrow(self, query, *a, **kw):
         # Return count row for notification queries
@@ -30,10 +33,14 @@ class _MockConn:
         return "UPDATE 0"
 
     def transaction(self):
+        parent = self
+
         class _Tx:
             async def __aenter__(self):
+                parent._in_transaction = True
                 return self
             async def __aexit__(self, *args):
+                parent._in_transaction = False
                 return False
         return _Tx()
 

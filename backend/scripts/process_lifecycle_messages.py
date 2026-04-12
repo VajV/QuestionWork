@@ -25,74 +25,6 @@ from app.services import email_service, lifecycle_service
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-# Map campaign_key → (email subject, body_html template fn(trigger_data) → str)
-CAMPAIGN_TEMPLATES: dict[str, tuple[str, "callable"]] = {
-    "incomplete_profile": (
-        "[QuestionWork] Дополните свой профиль",
-        lambda _: (
-            "<p>Вы зарегистрировались, но ваш профиль ещё не заполнен.</p>"
-            "<p><a href='__FRONTEND_URL__/profile/edit' style='color:#7c3aed;'>Заполнить профиль</a>"
-            " — это займёт всего 2 минуты!</p>"
-        ),
-    ),
-    "incomplete_quest_draft": (
-        "[QuestionWork] У вас есть незавершённый квест-черновик",
-        lambda td: (
-            f"<p>Квест <strong>#{td.get('quest_id', '')}</strong> остался черновиком.</p>"
-            "<p><a href='__FRONTEND_URL__/quests/create' style='color:#7c3aed;'>Завершить создание</a></p>"
-        ),
-    ),
-    "stale_shortlist": (
-        "[QuestionWork] Ваш шортлист ждёт действия",
-        lambda _: (
-            "<p>Вы добавили фрилансеров в шортлист, но ещё не назначили квест.</p>"
-            "<p><a href='__FRONTEND_URL__/shortlists' style='color:#7c3aed;'>Посмотреть шортлист</a></p>"
-        ),
-    ),
-    "unreviewed_completion": (
-        "[QuestionWork] Оцените выполненный квест",
-        lambda td: (
-            f"<p>Квест <strong>#{td.get('quest_id', '')}</strong> завершён, но вы ещё не оставили отзыв.</p>"
-            "<p><a href='__FRONTEND_URL__/quests' style='color:#7c3aed;'>Оставить отзыв</a></p>"
-        ),
-    ),
-    "dormant_client": (
-        "[QuestionWork] Мы скучаем по вам!",
-        lambda td: (
-            f"<p>Прошло {td.get('days_dormant', '?')} дней с момента вашего последнего квеста.</p>"
-            "<p><a href='__FRONTEND_URL__/quests/create' style='color:#7c3aed;'>Разместить новый квест</a></p>"
-        ),
-    ),
-    "lead_no_register": (
-        "[QuestionWork] Завершите регистрацию",
-        lambda _: (
-            "<p>Вы оставили заявку, но так и не зарегистрировались.</p>"
-            "<p><a href='__FRONTEND_URL__/auth/register' style='color:#7c3aed;'>Зарегистрироваться</a></p>"
-        ),
-    ),
-    "lead_no_quest": (
-        "[QuestionWork] Разместите свой первый квест",
-        lambda _: (
-            "<p>Вы зарегистрировались как клиент, но ещё не разместили ни одного квеста.</p>"
-            "<p><a href='__FRONTEND_URL__/quests/create' style='color:#7c3aed;'>Создать квест</a></p>"
-        ),
-    ),
-}
-
-
-def _build_body(campaign_key: str, trigger_data: dict) -> tuple[str, str]:
-    """Return (subject, body_html) for a campaign key."""
-    tpl = CAMPAIGN_TEMPLATES.get(campaign_key)
-    if tpl is None:
-        return (
-            "[QuestionWork] Уведомление",
-            "<p>У вас есть новое уведомление от QuestionWork.</p>",
-        )
-    subject, body_fn = tpl
-    body_html = body_fn(trigger_data).replace("__FRONTEND_URL__", settings.FRONTEND_URL)
-    return subject, body_html
-
-
 async def _process_batch(conn: asyncpg.Connection, dry_run: bool, limit: int) -> dict[str, int]:
     messages = await lifecycle_service.get_pending_messages(conn, limit=limit)
     sent = failed = skipped = 0
@@ -103,20 +35,22 @@ async def _process_batch(conn: asyncpg.Connection, dry_run: bool, limit: int) ->
         campaign_key = msg["campaign_key"]
         trigger_data: dict = dict(msg["trigger_data"]) if msg["trigger_data"] else {}
 
-        # Resolve user contact info
-        user_row = await conn.fetchrow(
-            "SELECT email, username FROM users WHERE id = $1::uuid", user_id
+        recipient = await lifecycle_service.resolve_delivery_recipient(
+            conn,
+            user_id=user_id,
+            campaign_key=campaign_key,
+            trigger_data=trigger_data,
         )
-        if user_row is None:
+        if recipient is None:
             logger.warning("User %s not found — suppressing lifecycle message %s", user_id, msg_id)
             async with conn.transaction():
                 await lifecycle_service.suppress(conn, msg_id)
             skipped += 1
             continue
 
-        email_address: str = user_row["email"]
-        username: str = user_row["username"]
-        subject, body_html = _build_body(campaign_key, trigger_data)
+        email_address = recipient["email"]
+        username = recipient["username"]
+        subject, body_html = lifecycle_service.build_lifecycle_email(campaign_key, trigger_data)
 
         if dry_run:
             logger.info(

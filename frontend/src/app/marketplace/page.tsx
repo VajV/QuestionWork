@@ -417,9 +417,11 @@ export default function MarketplacePage() {
       if (isIn) {
         await removeFromShortlist(freelancerId);
         setShortlistedIds((prev) => { const n = new Set(prev); n.delete(freelancerId); return n; });
+        trackAnalyticsEvent("shortlist_removed", { freelancer_id: freelancerId, source: "marketplace" });
       } else {
         await addToShortlist(freelancerId);
         setShortlistedIds((prev) => new Set(prev).add(freelancerId));
+        trackAnalyticsEvent("shortlist_added", { freelancer_id: freelancerId, source: "marketplace" });
       }
     } catch {
       // silent — optimistic UI

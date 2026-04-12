@@ -38,7 +38,8 @@ async def add_shortlist(
     if not exists:
         raise HTTPException(status_code=404, detail="Фрилансер не найден")
 
-    result = await shortlist_service.add_to_shortlist(conn, current_user.id, body.freelancer_id)
+    async with conn.transaction():
+        result = await shortlist_service.add_to_shortlist(conn, current_user.id, body.freelancer_id)
     if not result:
         raise HTTPException(status_code=500, detail="Не удалось добавить в шортлист")
     return ShortlistEntry(**result)
@@ -52,7 +53,8 @@ async def remove_shortlist(
     conn: asyncpg.Connection = Depends(get_db_connection),
 ):
     await check_rate_limit(get_client_ip(request), action="shortlist_remove", limit=30, window_seconds=60)
-    removed = await shortlist_service.remove_from_shortlist(conn, current_user.id, freelancer_id)
+    async with conn.transaction():
+        removed = await shortlist_service.remove_from_shortlist(conn, current_user.id, freelancer_id)
     if not removed:
         raise HTTPException(status_code=404, detail="Не найден в шортлисте")
 
@@ -79,3 +81,19 @@ async def list_shortlist_ids(
     """Quick list of freelancer IDs in shortlist (for frontend icon state)."""
     await check_rate_limit(get_client_ip(request), action="shortlist_ids", limit=60, window_seconds=60)
     return await shortlist_service.get_shortlisted_ids(conn, current_user.id)
+
+
+class ShortlistCountResponse(BaseModel):
+    count: int
+
+
+@router.get("/count", response_model=ShortlistCountResponse)
+async def shortlist_count(
+    request: Request,
+    current_user: UserProfile = Depends(require_auth),
+    conn: asyncpg.Connection = Depends(get_db_connection),
+):
+    """Return shortlist size for the current client."""
+    await check_rate_limit(get_client_ip(request), action="shortlist_count", limit=60, window_seconds=60)
+    count = await shortlist_service.get_shortlist_count(conn, current_user.id)
+    return {"count": count}

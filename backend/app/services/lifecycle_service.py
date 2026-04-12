@@ -16,15 +16,73 @@ Trigger patterns:
 
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import asyncpg
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 # How many messages to process per batch to avoid long-running DB transactions
 PROCESS_BATCH_SIZE = 50
+
+_LifecycleTemplate = tuple[str, Callable[[dict[str, Any]], str]]
+
+CAMPAIGN_TEMPLATES: dict[str, _LifecycleTemplate] = {
+    "incomplete_profile": (
+        "[QuestionWork] Дополните свой профиль",
+        lambda _trigger_data: (
+            "<p>Вы зарегистрировались, но ваш профиль ещё не заполнен.</p>"
+            "<p><a href='__FRONTEND_URL__/profile/edit' style='color:#7c3aed;'>Заполнить профиль</a>"
+            " — это займёт всего 2 минуты!</p>"
+        ),
+    ),
+    "incomplete_quest_draft": (
+        "[QuestionWork] У вас есть незавершённый квест-черновик",
+        lambda trigger_data: (
+            f"<p>Квест <strong>#{trigger_data.get('quest_id', '')}</strong> остался черновиком.</p>"
+            "<p><a href='__FRONTEND_URL__/quests/create' style='color:#7c3aed;'>Завершить создание</a></p>"
+        ),
+    ),
+    "stale_shortlist": (
+        "[QuestionWork] Ваш шортлист ждёт действия",
+        lambda _trigger_data: (
+            "<p>Вы добавили фрилансеров в шортлист, но ещё не назначили квест.</p>"
+            "<p><a href='__FRONTEND_URL__/shortlists' style='color:#7c3aed;'>Посмотреть шортлист</a></p>"
+        ),
+    ),
+    "unreviewed_completion": (
+        "[QuestionWork] Оцените выполненный квест",
+        lambda trigger_data: (
+            f"<p>Квест <strong>#{trigger_data.get('quest_id', '')}</strong> завершён, но вы ещё не оставили отзыв.</p>"
+            "<p><a href='__FRONTEND_URL__/quests' style='color:#7c3aed;'>Оставить отзыв</a></p>"
+        ),
+    ),
+    "dormant_client": (
+        "[QuestionWork] Мы скучаем по вам!",
+        lambda trigger_data: (
+            f"<p>Прошло {trigger_data.get('days_dormant', '?')} дней с момента вашего последнего квеста.</p>"
+            "<p><a href='__FRONTEND_URL__/quests/create' style='color:#7c3aed;'>Разместить новый квест</a></p>"
+        ),
+    ),
+    "lead_no_register": (
+        "[QuestionWork] Завершите регистрацию",
+        lambda _trigger_data: (
+            "<p>Вы оставили заявку, но так и не зарегистрировались.</p>"
+            "<p><a href='__FRONTEND_URL__/auth/register' style='color:#7c3aed;'>Зарегистрироваться</a></p>"
+        ),
+    ),
+    "lead_no_quest": (
+        "[QuestionWork] Разместите свой первый квест",
+        lambda _trigger_data: (
+            "<p>Вы зарегистрировались как клиент, но ещё не разместили ни одного квеста.</p>"
+            "<p><a href='__FRONTEND_URL__/quests/create' style='color:#7c3aed;'>Создать квест</a></p>"
+        ),
+    ),
+}
 
 
 # ── Enqueue helpers ───────────────────────────────────────────────────────────
@@ -172,6 +230,55 @@ async def suppress(conn: asyncpg.Connection, message_id: str) -> None:
         "UPDATE lifecycle_messages SET status = 'suppressed' WHERE id = $1",
         message_id,
     )
+
+
+async def record_delivery_error(conn: asyncpg.Connection, message_id: str, error: str) -> None:
+    await conn.execute(
+        "UPDATE lifecycle_messages SET error_message = $2 WHERE id = $1",
+        message_id,
+        error[:500],
+    )
+
+
+def build_lifecycle_email(campaign_key: str, trigger_data: Optional[Dict[str, Any]] = None) -> tuple[str, str]:
+    template = CAMPAIGN_TEMPLATES.get(campaign_key)
+    if template is None:
+        return (
+            "[QuestionWork] Уведомление",
+            "<p>У вас есть новое уведомление от QuestionWork.</p>",
+        )
+
+    subject, body_builder = template
+    body_html = body_builder(trigger_data or {}).replace("__FRONTEND_URL__", settings.FRONTEND_URL)
+    return subject, body_html
+
+
+async def resolve_delivery_recipient(
+    conn: asyncpg.Connection,
+    *,
+    user_id: str,
+    campaign_key: str,
+    trigger_data: Optional[Dict[str, Any]] = None,
+) -> dict[str, str] | None:
+    payload = trigger_data or {}
+    if campaign_key == "lead_no_register":
+        email = str(payload.get("email") or "").strip().lower()
+        if not email:
+            return None
+        username = str(payload.get("company_name") or payload.get("contact_name") or "there").strip() or "there"
+        return {"email": email, "username": username}
+
+    row = await conn.fetchrow(
+        "SELECT email, username FROM users WHERE id = $1",
+        user_id,
+    )
+    if row is None or not row.get("email"):
+        return None
+
+    return {
+        "email": str(row["email"]),
+        "username": str(row.get("username") or "User"),
+    }
 
 
 # ── Scan triggers (called by background workers) ──────────────────────────────

@@ -14,7 +14,7 @@ Requirements:
 
 Servers must be running:
     Backend:  http://127.0.0.1:8001
-    Frontend: http://127.0.0.1:3001
+    Frontend: http://127.0.0.1:3000
 """
 
 import asyncio
@@ -80,8 +80,8 @@ async def run_single_test(test_file: Path) -> dict:
     code = _re.sub(r'args=\[.*?\],', _safe_args, code, flags=_re.DOTALL)
 
     # Patch 5: normalize URL — TestSprite may hardcode localhost:3000 or :3001
-    code = code.replace("http://localhost:3000", "http://127.0.0.1:3001")
-    code = code.replace("http://localhost:3001", "http://127.0.0.1:3001")
+    code = code.replace("http://localhost:3000", "http://127.0.0.1:3000")
+    code = code.replace("http://localhost:3001", "http://127.0.0.1:3000")
 
     start = time.time()
     result = {

@@ -18,8 +18,50 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from app.services.wallet_service import quantize_money
 
 
+# Default VAT rate applied to platform fees (0 = no tax).
+# Override via settings / env if tax reporting is required.
+DEFAULT_TAX_RATE = Decimal("0")
+
+
 class DocumentNotFoundError(LookupError):
     """Raised when a requested wallet document source row is not found."""
+
+
+_DOCUMENT_STATUS_MAP: dict[str, str] = {
+    "completed": "issued",
+    "confirmed": "issued",
+    "pending": "draft",
+    "hold": "draft",
+    "held": "draft",
+    "processing": "draft",
+    "failed": "void",
+    "cancelled": "void",
+    "refunded": "void",
+    "rejected": "void",
+}
+
+
+def _derive_document_number(tx_id: str, created_at: datetime) -> str:
+    """Generate a deterministic document number from transaction metadata.
+
+    Format: ``DOC-YYYY-<short_id>`` where *short_id* is the first 12 hex
+    characters of the transaction id (enough for human reference while
+    keeping full traceability via ``transaction_id``).
+    """
+    year = created_at.year
+    short = tx_id.replace("-", "")[:12].upper()
+    return f"DOC-{year}-{short}"
+
+
+def _derive_document_status(tx_status: str) -> str:
+    return _DOCUMENT_STATUS_MAP.get(tx_status, "draft")
+
+
+def _compute_tax(base_amount: Decimal | None, tax_rate: Decimal = DEFAULT_TAX_RATE) -> tuple[Decimal, Decimal]:
+    """Return ``(tax_rate, tax_amount)`` for a fee / taxable base."""
+    if base_amount is None or tax_rate <= 0:
+        return Decimal("0"), Decimal("0")
+    return tax_rate, quantize_money(base_amount * tax_rate / Decimal("100"))
 
 
 def _ensure_datetime(value: datetime | None) -> datetime:
@@ -222,8 +264,15 @@ async def get_wallet_receipt_data(
         fee_display = _format_decimal(exact_platform_fee)
 
     created_at = _ensure_datetime(tx.get("created_at"))
+    document_number = _derive_document_number(tx["id"], created_at)
+    document_status = _derive_document_status(tx["status"])
+
+    tax_rate, tax_amount = _compute_tax(exact_platform_fee)
+
     return {
         "receipt_id": f"receipt-{tx['id']}",
+        "document_number": document_number,
+        "document_status": document_status,
         "transaction_id": tx["id"],
         "account_owner": owner_label,
         "created_at": created_at,
@@ -240,6 +289,10 @@ async def get_wallet_receipt_data(
         "counterparty": quest_context.get("counterparty", "-"),
         "platform_fee": fee_display,
         "platform_fee_percent": quest_context.get("platform_fee_percent"),
+        "tax_rate": tax_rate,
+        "tax_rate_label": _format_decimal(tax_rate),
+        "tax_amount": tax_amount,
+        "tax_amount_label": _format_decimal(tax_amount),
     }
 
 
@@ -289,6 +342,8 @@ async def get_wallet_statement_data(
         transactions.append(
             {
                 "id": row["id"],
+                "document_number": _derive_document_number(row["id"], created_at),
+                "document_status": _derive_document_status(row["status"]),
                 "quest_id": quest_id,
                 "quest_title": quest_context.get("quest_title") or "-",
                 "client_name": quest_context.get("client_name", "-"),
@@ -335,6 +390,8 @@ def generate_receipt_pdf(receipt_data: dict) -> bytes:
 
     pdf.setFont("Helvetica", 11)
     lines = [
+        ("Document No.", receipt_data["document_number"]),
+        ("Document Status", receipt_data["document_status"]),
         ("Receipt ID", receipt_data["receipt_id"]),
         ("Transaction ID", receipt_data["transaction_id"]),
         ("Account owner", receipt_data["account_owner"]),
@@ -348,6 +405,8 @@ def generate_receipt_pdf(receipt_data: dict) -> bytes:
         ("Counterparty", receipt_data["counterparty"]),
         ("Platform fee", receipt_data["platform_fee"]),
         ("Fee percent", str(receipt_data.get("platform_fee_percent") or "-")),
+        ("Tax rate %", receipt_data.get("tax_rate_label") or "-"),
+        ("Tax amount", receipt_data.get("tax_amount_label") or "-"),
         ("Quest ID", receipt_data.get("quest_id") or "-"),
     ]
 
@@ -421,12 +480,12 @@ def generate_statement_pdf(statement_data: dict) -> bytes:
 
     table_rows = [[
         _statement_paragraph("Date", styles["header"]),
+        _statement_paragraph("Doc No.", styles["header"]),
         _statement_paragraph("Transaction", styles["header"]),
         _statement_paragraph("Type / status", styles["header"]),
         _statement_paragraph("Amount", styles["header"]),
         _statement_paragraph("Platform fee", styles["header"]),
         _statement_paragraph("Quest", styles["header"]),
-        _statement_paragraph("Parties", styles["header"]),
     ]]
 
     transactions = statement_data["transactions"]
@@ -434,16 +493,12 @@ def generate_statement_pdf(statement_data: dict) -> bytes:
         for tx in transactions:
             table_rows.append([
                 _statement_paragraph(tx["created_at_label"], styles["body"]),
+                _statement_paragraph(tx.get("document_number") or "-", styles["body"]),
                 _statement_paragraph(tx["id"], styles["body"]),
                 _statement_paragraph(f"{tx['type']}<br/>{tx['status']}", styles["body"], allow_markup=True),
                 _statement_paragraph(f"{tx['amount_label']} {tx['currency']}", styles["body_right"]),
                 _statement_paragraph(tx.get("platform_fee") or "-", styles["body_right"]),
                 _statement_paragraph(f"{tx.get('quest_title') or '-'}<br/>{tx.get('quest_id') or '-'}", styles["body"], allow_markup=True),
-                _statement_paragraph(
-                    f"Client: {tx.get('client_name') or '-'}<br/>Freelancer: {tx.get('freelancer_name') or '-'}",
-                    styles["body"],
-                    allow_markup=True,
-                ),
             ])
     else:
         table_rows.append([
@@ -458,7 +513,7 @@ def generate_statement_pdf(statement_data: dict) -> bytes:
 
     transactions_table = Table(
         table_rows,
-        colWidths=[28 * mm, 28 * mm, 26 * mm, 24 * mm, 23 * mm, 36 * mm, 28 * mm],
+        colWidths=[26 * mm, 28 * mm, 26 * mm, 24 * mm, 24 * mm, 22 * mm, 36 * mm],
         repeatRows=1,
         hAlign="LEFT",
     )
@@ -508,6 +563,8 @@ def generate_statement_csv(statement_data: dict) -> bytes:
     output = StringIO()
     writer = csv.writer(output)
     writer.writerow([
+        "document_number",
+        "document_status",
         "transaction_id",
         "created_at",
         "type",
@@ -523,6 +580,8 @@ def generate_statement_csv(statement_data: dict) -> bytes:
     for tx in statement_data["transactions"]:
         writer.writerow(
             [
+                tx.get("document_number") or "",
+                tx.get("document_status") or "",
                 tx["id"],
                 tx["created_at"].isoformat(),
                 tx["type"],

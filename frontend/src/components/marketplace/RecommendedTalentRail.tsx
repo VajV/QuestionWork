@@ -6,10 +6,13 @@ import { Star, Users, ArrowRight, Sparkles } from "lucide-react";
 import { getRecommendedFreelancers, getTalentMarket, type RecommendedFreelancerCard } from "@/lib/api";
 import LevelBadge from "@/components/rpg/LevelBadge";
 import TrustScoreBadge from "@/components/rpg/TrustScoreBadge";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 
 interface Props {
   /** Existing quest ID to fetch backend recommendations */
   questId?: string;
+  /** Optional quest title for compare context */
+  questTitle?: string;
   /** Skills to match against talent market (quest skills) */
   skills?: string[];
   /** Maximum number of recommendations to show */
@@ -20,6 +23,7 @@ interface Props {
 
 export default function RecommendedTalentRail({
   questId,
+  questTitle,
   skills = [],
   limit = 3,
   title = "Подходящие исполнители",
@@ -80,6 +84,26 @@ export default function RecommendedTalentRail({
     load();
     return () => { cancelled = true; };
   }, [questId, skills, limit]);
+
+  const compareIds = members.slice(0, 4).map((member) => member.id);
+  const compareHref = (() => {
+    if (!questId || compareIds.length < 2) {
+      return null;
+    }
+
+    const searchParams = new URLSearchParams({
+      ids: compareIds.join(","),
+      source: "quest_recommendations",
+      questId,
+    });
+    if (questTitle) {
+      searchParams.set("questTitle", questTitle);
+    }
+    if (skills.length > 0) {
+      searchParams.set("skills", skills.join(","));
+    }
+    return `/marketplace/compare?${searchParams.toString()}`;
+  })();
 
   if (loading) {
     return (
@@ -156,12 +180,31 @@ export default function RecommendedTalentRail({
         </Link>
       ))}
 
-      <Link
-        href={`/marketplace${skills.length > 0 ? `?search=${encodeURIComponent(skills[0])}` : ""}`}
-        className="flex items-center justify-center gap-1.5 text-xs text-stone-400 hover:text-amber-300 transition-colors py-2"
-      >
-        Все исполнители <ArrowRight size={12} />
-      </Link>
+      <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-between">
+        {compareHref && (
+          <Link
+            href={compareHref}
+            onClick={() => {
+              trackAnalyticsEvent("recommendation_compare_opened", {
+                source: questId ? "quest_recommendations" : "recommended_talent",
+                quest_id: questId,
+                candidate_ids: compareIds,
+                candidate_count: compareIds.length,
+              });
+            }}
+            className="inline-flex items-center gap-1.5 text-xs text-cyan-300 hover:text-cyan-200 transition-colors"
+          >
+            <Sparkles size={12} /> Сравнить топ-{compareIds.length} под этот квест
+          </Link>
+        )}
+
+        <Link
+          href={`/marketplace${skills.length > 0 ? `?search=${encodeURIComponent(skills[0])}` : ""}`}
+          className="flex items-center gap-1.5 text-xs text-stone-400 hover:text-amber-300 transition-colors py-2 sm:py-0"
+        >
+          Все исполнители <ArrowRight size={12} />
+        </Link>
+      </div>
     </div>
   );
 }

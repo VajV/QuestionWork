@@ -2,9 +2,34 @@ name: CI
 
 on:
   push:
+    branches: [main, master, develop]
   pull_request:
+    branches: [main, master, develop]
+
+# One run per branch/PR — cancel superseded runs.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  # ─────────────────────────────────────────────
+  # Deploy gate: this job MUST pass before merge.
+  # Add "ci / deploy-gate" as a required status
+  # check in repo Settings → Branches → protection.
+  # ─────────────────────────────────────────────
+  deploy-gate:
+    runs-on: ubuntu-latest
+    needs: [ci, smoke-baseline]
+    if: always()
+    steps:
+      - name: Gate decision
+        run: |
+          if [[ "${{ needs.ci.result }}" != "success" || "${{ needs.smoke-baseline.result }}" != "success" ]]; then
+            echo "❌ Deploy gate FAILED — ci=${{ needs.ci.result }} smoke=${{ needs.smoke-baseline.result }}"
+            exit 1
+          fi
+          echo "✅ Deploy gate passed"
+
   ci:
     runs-on: ubuntu-latest
     services:

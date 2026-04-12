@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "@/lib/motion";
 import { createQuest, getApiErrorMessage, UserGrade } from "@/lib/api";
-import type { ApiError } from "@/lib/api";
 import { safeParseMoney } from "@/lib/money";
 import Button from "@/components/ui/Button";
 import QuestCreationSidebar, { type WizardStep } from "./QuestCreationSidebar";

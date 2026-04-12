@@ -80,10 +80,16 @@ export default function NotificationsPage() {
   }, [filter]);
 
   useEffect(() => {
+    let cancelled = false;
+
     if (isAuthenticated) {
       loadNotifications();
-      getNotificationPreferences().then(setPrefs).catch(() => {/* non-blocking */});
+      getNotificationPreferences()
+        .then((p) => { if (!cancelled) setPrefs(p); })
+        .catch(() => {/* non-blocking */});
     }
+
+    return () => { cancelled = true; };
   }, [isAuthenticated, loadNotifications]);
 
   const handleMarkRead = async (notificationId: string) => {

@@ -376,6 +376,31 @@ if (Test-Path -LiteralPath $backendEnvPath) {
     Write-Check "FRONTEND_URL configured"   ($envTxt -match "FRONTEND_URL=http://localhost:3000")
     Write-Check "DATABASE_URL present"      ($envTxt -match "DATABASE_URL=")
     Write-Check "JWT_ALGORITHM=HS256"       ($envTxt -match "JWT_ALGORITHM=HS256")
+
+    # Required env vars — every one must have a non-empty value
+    $requiredBackendVars = @(
+        "SECRET_KEY", "DATABASE_URL", "JWT_ALGORITHM", "JWT_EXPIRE_MINUTES",
+        "FRONTEND_URL", "REDIS_URL"
+    )
+    foreach ($varName in $requiredBackendVars) {
+        $hasValue = $envTxt -match "(?m)^${varName}=.+"
+        Write-Check "Env: $varName has value" $hasValue -IsWarn:(-not $hasValue)
+    }
+
+    # Safety: SECRET_KEY must NOT be the insecure placeholder
+    $insecureKey = $envTxt -match "SECRET_KEY=change-me-in-production"
+    Write-Check "SECRET_KEY is not insecure default" (-not $insecureKey)
+
+    # Safety: JWT_EXPIRE_MINUTES should be <= 15 for production-like config
+    $jwtExpMatch = [regex]::Match($envTxt, '(?m)^JWT_EXPIRE_MINUTES=(\d+)')
+    if ($jwtExpMatch.Success) {
+        $jwtMin = [int]$jwtExpMatch.Groups[1].Value
+        Write-Check "JWT_EXPIRE_MINUTES <= 15" ($jwtMin -le 15) "${jwtMin}m"
+    }
+
+    # Safety: DEBUG should not be True in production-like config
+    $debugTrue = $envTxt -match "(?m)^DEBUG=True"
+    Write-Check "DEBUG is not True" (-not $debugTrue) -IsWarn:$debugTrue
 } else {
     Write-Check "backend\.env readable" $false "file not found"
 }
@@ -387,6 +412,71 @@ if (Test-Path -LiteralPath $frontendEnvPath) {
 } else {
     Write-Check "frontend\.env.local readable" $false "file not found"
 }
+
+# ---------------------------------------------------------------------------
+# 7b. Port Conflict Detection
+# ---------------------------------------------------------------------------
+
+Write-Section "7b. Port Conflict Detection"
+
+$portsToCheck = @(
+    @{ Port = 8001; Expected = "python|uvicorn"; Label = "Backend (8001)" },
+    @{ Port = 3000; Expected = "node|next";      Label = "Frontend (3000)" },
+    @{ Port = 5432; Expected = "postgres";        Label = "PostgreSQL (5432)" },
+    @{ Port = 6379; Expected = "redis";           Label = "Redis (6379)" }
+)
+
+foreach ($p in $portsToCheck) {
+    $listening = Test-Port $p.Port
+    if ($listening) {
+        try {
+            $proc = Get-NetTCPConnection -LocalPort $p.Port -State Listen -ErrorAction SilentlyContinue |
+                    Select-Object -First 1
+            if ($proc) {
+                $procName = (Get-Process -Id $proc.OwningProcess -ErrorAction SilentlyContinue).ProcessName
+                $isExpected = $procName -match $p.Expected
+                Write-Check "$($p.Label) owned by expected process" $isExpected "$procName (PID $($proc.OwningProcess))" -IsWarn:(-not $isExpected)
+            } else {
+                Write-Check "$($p.Label) process check" $true "listening"
+            }
+        } catch {
+            Write-Check "$($p.Label) process check" $true "listening (details unavailable)" -IsWarn:$true
+        }
+    } else {
+        Write-Check "$($p.Label) is listening" $false "not running" -IsWarn:$true
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 7c. Quick Compile Gates
+# ---------------------------------------------------------------------------
+
+Write-Section "7c. Quick Compile Gates"
+
+# Backend: Python import check (fast, no pytest)
+$backendImportOk = $false
+if (Test-Path -LiteralPath $venvPython) {
+    try {
+        $importResult = & $venvPython -c "import app.main; print('ok')" 2>&1
+        $backendImportOk = ($importResult -match "ok")
+    } catch {}
+}
+Write-Check "Backend: app.main importable" $backendImportOk
+
+# Frontend: TypeScript check (only if node_modules present)
+$tscOk = $false
+$tscBin = Join-Path $FRONTEND_DIR "node_modules\.bin\tsc.cmd"
+if (Test-Path -LiteralPath $tscBin) {
+    try {
+        Push-Location $FRONTEND_DIR
+        $tscOut = & npx tsc --noEmit 2>&1
+        $tscOk = ($LASTEXITCODE -eq 0)
+        Pop-Location
+    } catch {
+        Pop-Location
+    }
+}
+Write-Check "Frontend: tsc --noEmit passes" $tscOk -IsWarn:(-not $tscOk)
 
 # ---------------------------------------------------------------------------
 # 8. Key Source Files

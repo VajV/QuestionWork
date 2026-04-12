@@ -212,6 +212,36 @@ async def mark_job_dead_letter(
     )
 
 
+async def requeue_terminal_job(
+    conn: asyncpg.Connection,
+    *,
+    job_id: str,
+    available_at: datetime,
+) -> asyncpg.Record | None:
+    return await conn.fetchrow(
+        """
+        UPDATE background_jobs
+        SET status = 'retry_scheduled',
+            available_at = $2,
+            enqueued_at = NULL,
+            started_at = NULL,
+            finished_at = NULL,
+            last_heartbeat_at = NULL,
+            last_error_code = NULL,
+            last_error = NULL,
+            last_enqueue_error = NULL,
+            lock_token = NULL,
+            locked_by = NULL,
+            updated_at = NOW()
+        WHERE id = $1
+          AND status IN ('failed', 'dead_letter')
+        RETURNING *
+        """,
+        job_id,
+        available_at,
+    )
+
+
 async def record_enqueue_success(conn: asyncpg.Connection, job_id: str) -> str:
     return await conn.execute(
         """

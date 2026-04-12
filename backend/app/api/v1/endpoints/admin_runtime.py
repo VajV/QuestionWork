@@ -5,13 +5,15 @@ from __future__ import annotations
 from datetime import datetime
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 
 from app.api.deps import require_admin
 from app.core.ratelimit import check_rate_limit, get_client_ip
 from app.db.session import get_db_connection
 from app.models.admin import (
     AdminCommandStatusResponse,
+    AdminJobReplayRequest,
+    AdminJobReplayResponse,
     AdminJobStatusResponse,
     AdminOperationsFeedResponse,
     AdminRuntimeHeartbeatPruneResponse,
@@ -54,6 +56,35 @@ async def admin_get_job_status(
 ):
     await _admin_rate_limit(request)
     result = await admin_runtime_service.get_job_status(conn, job_id)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return result
+
+
+@router.post(
+    "/jobs/{job_id}/requeue",
+    response_model=AdminJobReplayResponse,
+    summary="Manually requeue failed or dead-letter trust-layer job",
+)
+async def admin_requeue_job(
+    job_id: str,
+    request: Request,
+    admin: UserProfile = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_db_connection),
+    body: AdminJobReplayRequest | None = Body(default=None),
+):
+    await _admin_rate_limit(request)
+    try:
+        result = await admin_runtime_service.requeue_job(
+            conn,
+            job_id=job_id,
+            admin_id=admin.id,
+            reason=body.reason if body is not None else None,
+            request_ip=get_client_ip(request),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     return result

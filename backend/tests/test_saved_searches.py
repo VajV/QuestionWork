@@ -20,9 +20,17 @@ from app.services.saved_searches_service import (
 # Helpers
 # ─────────────────────────────────────────────────────────────────────
 
+class _FakeTransaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
 def _make_conn():
     conn = AsyncMock()
     conn.is_in_transaction = MagicMock(return_value=True)
+    conn.transaction = MagicMock(return_value=_FakeTransaction())
     return conn
 
 

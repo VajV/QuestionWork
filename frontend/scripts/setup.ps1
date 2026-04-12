@@ -563,7 +563,7 @@ $FRONTEND_ROOT = Split-Path -Parent $PSScriptRoot
 Set-Location $FRONTEND_ROOT
 
 Write-Host "`nЗапуск Next.js dev сервера..." -ForegroundColor Yellow
-Write-Host "Открой браузер: http://localhost:3001" -ForegroundColor Green
+Write-Host "Открой браузер: http://localhost:3000" -ForegroundColor Green
 Write-Host "`nНажми Ctrl+C для остановки`n" -ForegroundColor Gray
 
 npm run dev
@@ -582,6 +582,6 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "`n✅ Готово! Для запуска проекта:" -ForegroundColor Green
 Write-Host "   1. Перейди в C:\QuestionWork\frontend" -ForegroundColor White
 Write-Host "   2. Запусти: .\scripts\run.ps1" -ForegroundColor White
-Write-Host "   3. Открой http://localhost:3001" -ForegroundColor White
+Write-Host "   3. Открой http://localhost:3000" -ForegroundColor White
 
 Write-Host "`n========================================" -ForegroundColor Cyan

@@ -1014,3 +1014,58 @@ async def get_active_ability_effects(
             else:
                 merged[ek] = merged.get(ek, 0) + ev  # type: ignore[assignment]
     return merged
+
+
+async def expire_stale_abilities(conn: asyncpg.Connection) -> int:
+    """Clear expired active abilities from user_abilities.
+
+    Also handles post-rage burnout: for any rage_mode ability that just
+    expired without burnout already set, applies the forced burnout window.
+
+    Returns the number of rows expired.
+    """
+    now = datetime.now(timezone.utc)
+
+    # Find rage_mode abilities that expired and need burnout applied
+    expired_rage = await conn.fetch(
+        """
+        SELECT ua.user_id
+        FROM user_abilities ua
+        WHERE ua.ability_id = 'rage_mode'
+          AND ua.active_until IS NOT NULL
+          AND ua.active_until <= $1
+          AND (
+              SELECT burnout_until FROM user_class_progress
+              WHERE user_id = ua.user_id
+          ) IS NULL
+        """,
+        now,
+    )
+    for row in expired_rage:
+        rage_ability = get_ability_config("berserk", "rage_mode")
+        post_rage_hours = int(rage_ability.effects.get("post_rage_burnout_hours", 12)) if rage_ability else 12
+        burnout_until = now + timedelta(hours=post_rage_hours)
+        await conn.execute(
+            """
+            UPDATE user_class_progress
+            SET burnout_until = $1, rage_active_until = NULL, consecutive_quests = 0, updated_at = $2
+            WHERE user_id = $3 AND (burnout_until IS NULL OR burnout_until < $2)
+            """,
+            burnout_until, now, row["user_id"],
+        )
+        logger.info("Post-rage burnout applied for user %s (scheduler)", row["user_id"])
+
+    # Clear all expired user_abilities rows (they've been consumed)
+    result = await conn.execute(
+        "DELETE FROM user_abilities WHERE active_until IS NOT NULL AND active_until <= $1",
+        now,
+    )
+    try:
+        expired_count = int(result.split()[-1])
+    except (IndexError, ValueError):
+        expired_count = 0
+
+    if expired_count:
+        logger.info("Expired %d stale user_abilities rows", expired_count)
+
+    return expired_count

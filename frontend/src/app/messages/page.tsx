@@ -36,22 +36,26 @@ export default function MessagesPage() {
   }, [authLoading, isAuthenticated, router]);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function loadDialogs() {
       setLoading(true);
       setError(null);
       try {
         const data = await getQuestDialogs(100, 0);
-        setDialogs(data.dialogs);
+        if (!cancelled) setDialogs(data.dialogs);
       } catch (err: unknown) {
-        setError(getApiErrorMessage(err, "Не удалось загрузить диалоги"));
+        if (!cancelled) setError(getApiErrorMessage(err, "Не удалось загрузить диалоги"));
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
     if (!authLoading && isAuthenticated) {
       loadDialogs();
     }
+
+    return () => { cancelled = true; };
   }, [authLoading, isAuthenticated]);
 
   if (authLoading || loading) {

@@ -16,6 +16,20 @@ from app.models.quest import QuestApplicationCreate, QuestStatusEnum, QuestRevis
 
 
 # ──────────────────────────────────────────────────────
+# Module-level patch: challenge_service is non-critical and should not
+# interfere with unit tests that mock conn.fetchrow with fixed side_effects.
+# ──────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _patch_challenge_service():
+    with patch("app.services.quest_service.challenge_service") as mock_ch:
+        mock_ch.increment_challenge_progress = AsyncMock(return_value=None)
+        with patch("app.services.quest_service.referral_service") as mock_ref:
+            mock_ref.grant_referral_rewards = AsyncMock(return_value=None)
+            yield mock_ch
+
+
+# ──────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────
 

@@ -10,7 +10,7 @@ ctx = b.new_context()
 ctx.set_default_timeout(15000)
 pg = ctx.new_page()
 
-pg.goto("http://127.0.0.1:3001/auth/login")
+pg.goto("http://127.0.0.1:3000/auth/login")
 pg.wait_for_load_state("networkidle")
 
 # Try to fill username but leave password empty
@@ -24,7 +24,7 @@ print("Has error?", any(c in body for c in ["💀", "Заполните", "по�
 
 # Fill just password
 pg2 = ctx.new_page()
-pg2.goto("http://127.0.0.1:3001/auth/login")
+pg2.goto("http://127.0.0.1:3000/auth/login")
 pg2.wait_for_load_state("networkidle")
 pg2.fill("#password", "TestPass1!")
 pg2.click("button[type=submit]")

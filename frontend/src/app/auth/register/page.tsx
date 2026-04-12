@@ -7,6 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import { trackAnalyticsEvent } from "@/lib/analytics";
+import { getApiErrorMessage } from "@/lib/api";
 
 type UserRole = "client" | "freelancer";
 
@@ -145,7 +146,7 @@ export default function RegisterPage() {
       }
     } catch (err) {
       console.error("Registration error:", err);
-      setError("Произошла ошибка");
+      setError(getApiErrorMessage(err, "Произошла ошибка при регистрации"));
     } finally {
       setLoading(false);
     }

@@ -55,6 +55,7 @@ def client():
 ADMIN_RUNTIME_ROUTES = [
     ("GET", "/api/v1/admin/commands/00000000-0000-0000-0000-000000000001"),
     ("GET", "/api/v1/admin/jobs/00000000-0000-0000-0000-000000000002"),
+    ("POST", "/api/v1/admin/jobs/00000000-0000-0000-0000-000000000002/requeue"),
     ("GET", "/api/v1/admin/operations"),
     ("GET", "/api/v1/admin/runtime/heartbeats"),
     ("POST", "/api/v1/admin/runtime/heartbeats/prune"),
@@ -143,6 +144,90 @@ def test_admin_get_job_status_returns_404_when_missing(client):
 
         assert response.status_code == 404
         assert response.json()["detail"] == "Job not found"
+    finally:
+        app.dependency_overrides.pop(require_admin, None)
+
+
+def test_admin_requeue_job_success(client):
+    from app.api.deps import require_admin
+    from app.main import app
+
+    expected = {
+        "job_id": "00000000-0000-0000-0000-000000000002",
+        "previous_status": "dead_letter",
+        "status": "retry_scheduled",
+        "queue_name": "ops",
+        "enqueued": True,
+        "message": "Job requeued and published to the worker queue",
+        "enqueue_error": None,
+    }
+
+    app.dependency_overrides[require_admin] = lambda: _make_user("admin")
+    try:
+        with patch(
+            "app.api.v1.endpoints.admin_runtime.admin_runtime_service.requeue_job",
+            new=AsyncMock(return_value=expected),
+        ):
+            response = client.post(
+                "/api/v1/admin/jobs/00000000-0000-0000-0000-000000000002/requeue",
+                json={"reason": "recover after provider fix"},
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "retry_scheduled"
+        assert body["enqueued"] is True
+    finally:
+        app.dependency_overrides.pop(require_admin, None)
+
+
+def test_admin_requeue_job_returns_400_on_invalid_status(client):
+    from app.api.deps import require_admin
+    from app.main import app
+
+    app.dependency_overrides[require_admin] = lambda: _make_user("admin")
+    try:
+        with patch(
+            "app.api.v1.endpoints.admin_runtime.admin_runtime_service.requeue_job",
+            new=AsyncMock(side_effect=ValueError("Only failed or dead-letter jobs can be requeued manually")),
+        ):
+            response = client.post(
+                "/api/v1/admin/jobs/00000000-0000-0000-0000-000000000002/requeue",
+                json={},
+            )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Only failed or dead-letter jobs can be requeued manually"
+    finally:
+        app.dependency_overrides.pop(require_admin, None)
+
+
+def test_admin_requeue_job_accepts_missing_body(client):
+    from app.api.deps import require_admin
+    from app.main import app
+
+    expected = {
+        "job_id": "00000000-0000-0000-0000-000000000002",
+        "previous_status": "dead_letter",
+        "status": "retry_scheduled",
+        "queue_name": "ops",
+        "enqueued": False,
+        "message": "Job requeued; scheduler will retry enqueue automatically",
+        "enqueue_error": "redis unavailable",
+    }
+
+    app.dependency_overrides[require_admin] = lambda: _make_user("admin")
+    try:
+        with patch(
+            "app.api.v1.endpoints.admin_runtime.admin_runtime_service.requeue_job",
+            new=AsyncMock(return_value=expected),
+        ):
+            response = client.post(
+                "/api/v1/admin/jobs/00000000-0000-0000-0000-000000000002/requeue",
+            )
+
+        assert response.status_code == 200
+        assert response.json()["enqueued"] is False
     finally:
         app.dependency_overrides.pop(require_admin, None)
 

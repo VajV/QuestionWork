@@ -22,7 +22,7 @@ pg.on("response", on_response)
 pg.on("request", on_request)
 pg.on("console", lambda m: print("CONSOLE:", m.type[:4], m.text[:80]) if m.type in ("error", "warning") else None)
 
-pg.goto("http://127.0.0.1:3001/auth/login")
+pg.goto("http://127.0.0.1:3000/auth/login")
 pg.wait_for_load_state("networkidle")
 print("Loaded:", pg.url)
 

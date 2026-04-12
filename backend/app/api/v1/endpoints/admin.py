@@ -165,6 +165,8 @@ class AdminBroadcastNotificationRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     message: str = Field(..., min_length=1, max_length=2000)
     event_type: str = Field(default="admin_broadcast")
+    dry_run: bool = Field(default=False, description="If true, preview affected users without sending")
+    idempotency_key: Optional[str] = Field(default=None, max_length=128, description="Prevents duplicate broadcasts")
 
 
 class AdminGuildSeasonRewardConfigRequest(BaseModel):
@@ -875,6 +877,8 @@ async def admin_broadcast_notification(
             return await admin_service.broadcast_notification(
                 conn, body.user_ids, body.title, body.message, body.event_type,
                 current_admin.id, ip,
+                dry_run=body.dry_run,
+                idempotency_key=body.idempotency_key,
             )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

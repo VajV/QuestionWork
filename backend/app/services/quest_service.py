@@ -35,6 +35,7 @@ from app.models.quest import (
     QuestApplicationCreate,
     QuestCompletionCreate,
     QuestCreate,
+    QuestInviteResponse,
     QuestListResponse,
     QuestRevisionRequest,
     QuestStatusHistoryEntry,
@@ -52,7 +53,7 @@ from app.models.quest import (
     ChainDetailResponse,
     ChainListResponse,
 )
-from app.services import wallet_service, badge_service, notification_service, class_service, message_service, guild_economy_service, trust_score_service
+from app.services import wallet_service, badge_service, notification_service, class_service, message_service, guild_economy_service, trust_score_service, challenge_service, referral_service
 from app.services.quest_helpers import record_quest_status_history as _record_status_history
 from app.models.user import GradeEnum, UserProfile, row_to_user_profile
 
@@ -591,6 +592,15 @@ async def apply_to_quest(
 
         await conn.execute("UPDATE quests SET updated_at = $1 WHERE id = $2", now, quest_id)
 
+    # Weekly challenge: apply_to_quests (outside main TX — non-critical)
+    try:
+        async with conn.transaction():
+            await challenge_service.increment_challenge_progress(
+                conn, user_id=current_user.id, challenge_type="apply_to_quests"
+            )
+    except Exception:
+        logger.exception("Weekly challenge (apply) update failed for user %s", current_user.id)
+
     return QuestApplication(
         id=application_id,
         quest_id=quest_id,
@@ -600,6 +610,88 @@ async def apply_to_quest(
         cover_letter=application_data.cover_letter,
         proposed_price=application_data.proposed_price,
         created_at=now,
+    )
+
+
+async def invite_freelancer_to_quest(
+    conn: asyncpg.Connection,
+    quest_id: str,
+    freelancer_id: str,
+    current_user: UserProfile,
+) -> QuestInviteResponse:
+    """Invite a freelancer to apply to an open quest via notification."""
+    async with conn.transaction():
+        quest = await conn.fetchrow(
+            "SELECT id, client_id, client_username, title, status, assigned_to FROM quests WHERE id = $1 FOR UPDATE",
+            quest_id,
+        )
+        if not quest:
+            raise ValueError("Quest not found")
+
+        if current_user.role != "admin" and quest["client_id"] != current_user.id:
+            raise PermissionError("Only quest owner or admin can invite freelancers")
+
+        if quest["status"] != QuestStatusEnum.open.value:
+            raise ValueError("Can only invite freelancers to an open quest")
+
+        if quest.get("assigned_to"):
+            raise ValueError("Cannot invite freelancers after assignment")
+
+        freelancer = await conn.fetchrow(
+            "SELECT id, username, role, is_banned FROM users WHERE id = $1",
+            freelancer_id,
+        )
+        if not freelancer or freelancer.get("role") != "freelancer":
+            raise ValueError("Freelancer not found")
+        if freelancer.get("is_banned"):
+            raise PermissionError("Banned users cannot be invited to quests")
+        if freelancer_id == quest["client_id"]:
+            raise ValueError("Cannot invite the quest owner")
+
+        existing_application = await conn.fetchval(
+            "SELECT 1 FROM applications WHERE quest_id = $1 AND freelancer_id = $2",
+            quest_id,
+            freelancer_id,
+        )
+        if existing_application:
+            raise ValueError("This freelancer has already applied to the quest")
+
+        invite_title = "Вас пригласили откликнуться"
+        invite_message = (
+            f"{quest['client_username']} приглашает вас откликнуться на квест: {quest['title']}"
+        )
+        existing_notification = await conn.fetchval(
+            """
+            SELECT id
+            FROM notifications
+            WHERE user_id = $1 AND event_type = 'quest_invited' AND title = $2 AND message = $3
+            LIMIT 1
+            """,
+            freelancer_id,
+            invite_title,
+            invite_message,
+        )
+        if existing_notification:
+            return QuestInviteResponse(
+                quest_id=quest_id,
+                freelancer_id=freelancer_id,
+                already_sent=True,
+                message="Invite already sent to this freelancer",
+            )
+
+        await notification_service.create_notification(
+            conn,
+            user_id=freelancer_id,
+            title=invite_title,
+            message=invite_message,
+            event_type="quest_invited",
+        )
+
+    return QuestInviteResponse(
+        quest_id=quest_id,
+        freelancer_id=freelancer_id,
+        already_sent=False,
+        message="Invite sent to freelancer",
     )
 
 
@@ -1176,6 +1268,27 @@ async def confirm_quest_completion(
             required_portfolio=quest.get("required_portfolio", False),
         )
         await trust_score_service.refresh_trust_score(conn, quest["assigned_to"])
+
+        # 6. Weekly challenge progress: complete_quests + earn_xp
+        try:
+            await challenge_service.increment_challenge_progress(
+                conn, user_id=quest["assigned_to"], challenge_type="complete_quests"
+            )
+            await challenge_service.increment_challenge_progress(
+                conn, user_id=quest["assigned_to"], challenge_type="earn_xp", increment=xp_reward
+            )
+            if quest.get("is_urgent"):
+                await challenge_service.increment_challenge_progress(
+                    conn, user_id=quest["assigned_to"], challenge_type="complete_urgent"
+                )
+        except Exception:  # Non-critical — log but don't fail the transaction
+            logger.exception("Weekly challenge update failed for user %s", quest["assigned_to"])
+
+        # 7. Referral reward — on first quest confirmation for the freelancer
+        try:
+            await referral_service.grant_referral_rewards(conn, quest["assigned_to"])
+        except Exception:
+            logger.exception("Referral reward check failed for user %s", quest["assigned_to"])
 
     logger.info(
         f"Quest {quest_id} confirmed. Freelancer {freelancer_row['username']}: "

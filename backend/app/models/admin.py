@@ -388,3 +388,17 @@ class AdminRuntimeHeartbeatPruneResponse(BaseModel):
     stale_only: bool
     retention_seconds: int
     deleted_count: int
+
+
+class AdminJobReplayRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=300)
+
+
+class AdminJobReplayResponse(BaseModel):
+    job_id: str
+    previous_status: str
+    status: str
+    queue_name: str
+    enqueued: bool
+    message: str
+    enqueue_error: str | None = None

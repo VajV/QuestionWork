@@ -11,7 +11,9 @@ from app.api.v1.endpoints import (
 	analytics,
 	auth,
 	badges,
+	challenges,
 	classes,
+	counter_offers,
 	disputes,
 	events,
 	leads,
@@ -20,8 +22,10 @@ from app.api.v1.endpoints import (
 	marketplace,
 	meta,
 	messages,
+	milestones,
 	notifications,
 	quests,
+	referrals,
 	reviews,
 	saved_searches,
 	shortlists,
@@ -58,3 +62,7 @@ api_router.include_router(saved_searches.router)
 api_router.include_router(events.router)
 api_router.include_router(events.admin_events_router)
 api_router.include_router(learning.router)
+api_router.include_router(counter_offers.router)
+api_router.include_router(milestones.router)
+api_router.include_router(challenges.router)
+api_router.include_router(referrals.router)

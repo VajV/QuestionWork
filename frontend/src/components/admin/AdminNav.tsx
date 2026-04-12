@@ -8,6 +8,7 @@ import {
   Users,
   ScrollText,
   Wallet,
+  Activity,
   FileText,
   Menu,
   X,
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { href: "/admin/quests", label: "Квесты", icon: ScrollText },
   { href: "/admin/withdrawals", label: "Выводы средств", icon: Wallet },
   { href: "/admin/disputes", label: "Споры", icon: Gavel },
+  { href: "/admin/runtime", label: "Runtime", icon: Activity },
   { href: "/admin/logs", label: "Аудит логи", icon: FileText },
 ] as const;
 

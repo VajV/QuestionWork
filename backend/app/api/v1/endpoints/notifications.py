@@ -60,7 +60,8 @@ async def mark_notification_read(
     """Mark a single notification as read. Returns 404 if not found or not owned."""
     ip = get_client_ip(request)
     await check_rate_limit(ip, action="mark_notification_read", limit=60, window_seconds=60)
-    updated = await notification_service.mark_as_read(conn, notification_id, current_user.id)
+    async with conn.transaction():
+        updated = await notification_service.mark_as_read(conn, notification_id, current_user.id)
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -78,7 +79,8 @@ async def mark_all_notifications_read(
     """Mark all unread notifications as read for the authenticated user."""
     ip = get_client_ip(request)
     await check_rate_limit(ip, action="mark_all_notifications_read", limit=20, window_seconds=60)
-    count = await notification_service.mark_all_as_read(conn, current_user.id)
+    async with conn.transaction():
+        count = await notification_service.mark_all_as_read(conn, current_user.id)
     return {"marked_read": count}
 
 

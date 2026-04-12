@@ -446,3 +446,81 @@ def test_broadcast_notification_empty_user_ids_returns_422(client):
         assert r.status_code == 422
     finally:
         app.dependency_overrides.pop(require_admin, None)
+
+
+def test_broadcast_dry_run_returns_preview(client, monkeypatch):
+    """dry_run=True returns affected users without sending."""
+    from app.api.deps import require_admin
+    from app.api.v1.endpoints import admin as admin_endpoints
+    from app.main import app
+
+    async def _fake_broadcast(conn, user_ids, title, message, event_type, admin_id, ip, *, dry_run=False, idempotency_key=None):
+        return {
+            "dry_run": True,
+            "total_recipients": 2,
+            "valid_recipients": 2,
+            "invalid_ids": [],
+            "affected_users": [
+                {"id": "u1", "username": "alice"},
+                {"id": "u2", "username": "bob"},
+            ],
+            "title": title,
+            "message": message,
+            "event_type": event_type,
+        }
+
+    monkeypatch.setattr(admin_endpoints.admin_service, "broadcast_notification", _fake_broadcast)
+    app.dependency_overrides[require_admin] = lambda: _make_user("admin")
+    try:
+        r = client.post(
+            "/api/v1/admin/notifications/broadcast",
+            json={
+                "user_ids": ["u1", "u2"],
+                "title": "Hello",
+                "message": "Preview test",
+                "dry_run": True,
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["dry_run"] is True
+        assert body["valid_recipients"] == 2
+        assert len(body["affected_users"]) == 2
+    finally:
+        app.dependency_overrides.pop(require_admin, None)
+
+
+def test_broadcast_idempotency_key_duplicate_returns_info(client, monkeypatch):
+    """Duplicate idempotency_key returns previous result without resending."""
+    from app.api.deps import require_admin
+    from app.api.v1.endpoints import admin as admin_endpoints
+    from app.main import app
+
+    async def _fake_broadcast(conn, user_ids, title, message, event_type, admin_id, ip, *, dry_run=False, idempotency_key=None):
+        return {
+            "total_recipients": 3,
+            "sent": 3,
+            "title": "Already sent",
+            "duplicate": True,
+            "idempotency_key": idempotency_key,
+            "message": "Broadcast with this idempotency_key was already sent.",
+        }
+
+    monkeypatch.setattr(admin_endpoints.admin_service, "broadcast_notification", _fake_broadcast)
+    app.dependency_overrides[require_admin] = lambda: _make_user("admin")
+    try:
+        r = client.post(
+            "/api/v1/admin/notifications/broadcast",
+            json={
+                "user_ids": ["u1", "u2", "u3"],
+                "title": "Dup",
+                "message": "Should not resend",
+                "idempotency_key": "bc_2026-04-11_abc123",
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["duplicate"] is True
+        assert body["idempotency_key"] == "bc_2026-04-11_abc123"
+    finally:
+        app.dependency_overrides.pop(require_admin, None)

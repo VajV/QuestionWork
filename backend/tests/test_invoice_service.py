@@ -91,6 +91,12 @@ async def test_get_wallet_receipt_data_derives_counterparty_and_fee():
     assert receipt["freelancer_name"] == "freelancer_user"
     assert receipt["platform_fee"] == "13.33"
     assert receipt["amount_label"] == "120.00"
+    # Document fields
+    assert receipt["document_number"].startswith("DOC-2026-")
+    assert receipt["document_status"] == "issued"  # tx status = completed
+    # Tax fields (DEFAULT_TAX_RATE is 0)
+    assert receipt["tax_rate"] == Decimal("0")
+    assert receipt["tax_amount"] == Decimal("0")
 
 
 @pytest.mark.asyncio
@@ -112,12 +118,17 @@ async def test_get_wallet_statement_data_builds_totals_for_range():
     assert statement["transactions"][0]["client_name"] == "client_user"
     assert statement["transactions"][0]["freelancer_name"] == "freelancer_user"
     assert statement["transactions"][0]["platform_fee"] == "13.33"
+    assert statement["transactions"][0]["document_number"].startswith("DOC-2026-")
+    assert statement["transactions"][0]["document_status"] == "issued"
+    assert statement["transactions"][1]["document_status"] == "draft"  # status = pending
 
 
 def test_generate_receipt_pdf_returns_pdf_bytes():
     pdf = invoice_service.generate_receipt_pdf(
         {
             "receipt_id": "receipt-tx_1",
+            "document_number": "DOC-2026-TX10000000",
+            "document_status": "issued",
             "transaction_id": "tx_1",
             "account_owner": "freelancer_user",
             "created_at_label": "2026-03-17 10:15 UTC",
@@ -128,6 +139,8 @@ def test_generate_receipt_pdf_returns_pdf_bytes():
             "counterparty": "client_user",
             "platform_fee": "13.33",
             "platform_fee_percent": "10.0",
+            "tax_rate_label": "0.00",
+            "tax_amount_label": "0.00",
             "quest_title": "Landing page",
             "quest_id": "quest_1",
             "client_name": "client_user",
@@ -172,6 +185,6 @@ def test_generate_statement_pdf_and_csv_return_content():
     csv_data = invoice_service.generate_statement_csv(statement_data).decode("utf-8")
 
     assert pdf.startswith(b"%PDF")
-    assert "transaction_id,created_at,type,status,amount,currency,platform_fee,quest_id,quest_title,client_name,freelancer_name" in csv_data
+    assert "document_number,document_status,transaction_id,created_at,type,status,amount,currency,platform_fee,quest_id,quest_title,client_name,freelancer_name" in csv_data
     assert "tx_income" in csv_data
     assert "Landing page" in csv_data

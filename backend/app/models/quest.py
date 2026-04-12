@@ -166,6 +166,21 @@ class QuestApplicationCreate(BaseModel):
     proposed_price: Optional[Decimal] = Field(None, description="Предлагаемая цена", ge=0)
 
 
+class QuestInviteCreate(BaseModel):
+    """Payload for inviting a freelancer to apply to an open quest."""
+
+    freelancer_id: str = Field(..., description="ID фрилансера", min_length=1)
+
+
+class QuestInviteResponse(BaseModel):
+    """Result of sending or reusing a quest invite notification."""
+
+    quest_id: str
+    freelancer_id: str
+    already_sent: bool = False
+    message: str
+
+
 class QuestCompletionCreate(BaseModel):
     """Данные для сдачи результата по квесту."""
     delivery_note: Optional[str] = Field(

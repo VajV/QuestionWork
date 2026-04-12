@@ -39,6 +39,7 @@ interface ProfilePageData {
 // Client-only: make API calls → skip SSR to avoid hydration mismatch
 const WalletPanel = dynamic(() => import("@/components/rpg/WalletPanel"), { ssr: false });
 const ReviewList = dynamic(() => import("@/components/rpg/ReviewList"), { ssr: false });
+const ReferralPanel = dynamic(() => import("@/components/growth/ReferralPanel").then(m => ({ default: m.ReferralPanel })), { ssr: false });
 
 const RARITY_TONE: Record<string, string> = {
   legendary: "border-amber-400/50 bg-amber-400/10 text-amber-100",
@@ -799,6 +800,13 @@ export default function ProfilePage() {
 
           {/* Кошелёк */}
           <WalletPanel />
+
+          {/* Реферальная программа (фрилансеры) */}
+          {profile.role === "freelancer" && (
+            <div className="mt-6">
+              <ReferralPanel />
+            </div>
+          )}
 
           {/* Бейджи */}
           <div className="rpg-card p-6 mt-6">

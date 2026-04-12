@@ -103,6 +103,24 @@ class Settings(BaseSettings):
     SMTP_FROM: str = "noreply@questionwork.com"
     SMTP_TLS: bool = True
 
+    # Lifecycle CRM automation
+    LIFECYCLE_DELIVERY_JOBS_ENABLED: bool = False
+    LIFECYCLE_DELIVERY_BATCH_LIMIT: int = 50
+    LIFECYCLE_SCAN_ENABLED: bool = False
+    LIFECYCLE_SCAN_INTERVAL_SECONDS: int = 3600
+
+    # Saved search alerts
+    SAVED_SEARCH_ALERTS_ENABLED: bool = True
+    SAVED_SEARCH_ALERT_INTERVAL_SECONDS: int = 900   # 15 min between full runs
+    SAVED_SEARCH_ALERT_BATCH_LIMIT: int = 50          # max searches evaluated per tick
+
+    # RPG ability expiry + burnout
+    ABILITY_EXPIRY_INTERVAL_SECONDS: int = 60         # how often scheduler checks for expired abilities
+
+    # Weekly challenges
+    WEEKLY_CHALLENGES_ENABLED: bool = True
+    WEEKLY_CHALLENGE_RESET_DAY: int = 0               # 0=Monday (isoweekday()-1)
+
     # Backup
     BACKUP_DIR: str = "/var/backups/questionwork"  # override in .env
     BACKUP_RETENTION_DAYS: int = 7
@@ -258,6 +276,10 @@ def _validate_settings(s: Settings) -> None:
         raise RuntimeError("ORPHANED_QUEUED_RECOVERY_INTERVAL_SECONDS must be > 0")
     if s.RUNTIME_HEARTBEAT_RETENTION_SECONDS <= 0:
         raise RuntimeError("RUNTIME_HEARTBEAT_RETENTION_SECONDS must be > 0")
+    if s.LIFECYCLE_DELIVERY_BATCH_LIMIT <= 0:
+        raise RuntimeError("LIFECYCLE_DELIVERY_BATCH_LIMIT must be > 0")
+    if s.LIFECYCLE_SCAN_INTERVAL_SECONDS <= 0:
+        raise RuntimeError("LIFECYCLE_SCAN_INTERVAL_SECONDS must be > 0")
     if s.ANALYTICS_EVENTS_RETENTION_DAYS <= 0:
         raise RuntimeError("ANALYTICS_EVENTS_RETENTION_DAYS must be > 0")
     if s.STALE_RUNNING_TIMEOUT_SECONDS <= s.WORKER_HEARTBEAT_INTERVAL_SECONDS:

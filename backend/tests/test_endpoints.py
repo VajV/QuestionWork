@@ -261,7 +261,7 @@ def test_register_invalid_email(client):
 
 
 def test_register_cannot_create_admin(client):
-    """P0-1: Sending role=admin must NOT create an admin user."""
+    """Self-registration as admin must be rejected by request validation."""
     r = client.post(
         "/api/v1/auth/register",
         json={
@@ -271,10 +271,7 @@ def test_register_cannot_create_admin(client):
             "role": "admin",
         },
     )
-    # Registration should succeed but user must be downgraded to freelancer
-    assert r.status_code == 201
-    data = r.json()
-    assert data["user"]["role"] == "freelancer"
+    assert r.status_code == 422
 
 
 # ---------------------------------------------------------------------------
@@ -866,14 +863,9 @@ def test_get_quest_not_found(client):
 
 
 def test_get_quest_history_unauthenticated(client):
-    """GET /quests/{id}/history without auth must not expose quest timeline."""
-    with patch(
-        "app.api.v1.endpoints.quests.quest_service.get_quest_status_history",
-        new_callable=AsyncMock,
-    ) as mock_history:
-        mock_history.side_effect = PermissionError("Only quest participants or admins can view quest history")
-        r = client.get("/api/v1/quests/some_id/history")
-    assert r.status_code == 403
+    """GET /quests/{id}/history without auth is rejected by require_auth."""
+    r = client.get("/api/v1/quests/some_id/history")
+    assert r.status_code == 401
 
 
 # ---------------------------------------------------------------------------

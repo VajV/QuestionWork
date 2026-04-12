@@ -52,7 +52,7 @@ export default function RecommendedQuestPanel({ limit = 4 }: Props) {
         </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
           {Array.from({ length: Math.min(limit, 4) }).map((_, index) => (
-            <div key={index} className="h-28 rounded-2xl bg-white/5 animate-pulse" />
+            <div key={`skeleton-${index}`} className="h-28 rounded-2xl bg-white/5 animate-pulse" />
           ))}
         </div>
       </Card>

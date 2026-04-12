@@ -14,14 +14,21 @@ from app.jobs.arq import create_arq_pool, enqueue_job_message
 from app.jobs.enums import RUNTIME_KIND_SCHEDULER, RUNTIME_KIND_WORKER
 from app.repositories import job_repository, runtime_heartbeat_repository
 from app.services import analytics_service
+from app.services import lifecycle_runtime_service, lifecycle_service
 from app.services import withdrawal_runtime_service
 from app.services import dispute_service
 from app.services import email_runtime_service
 from app.services import event_service
+from app.services import saved_searches_service
+from app.services import class_service
+from app.services import challenge_service
 
 logger = logging.getLogger(__name__)
 
 SCHEDULER_LEASE_KEY = "questionwork:runtime:scheduler:leader"
+LIFECYCLE_SCAN_INTERVAL_KEY = "questionwork:runtime:lifecycle:scan"
+SAVED_SEARCH_ALERT_KEY = "questionwork:runtime:saved_search_alerts:last_run"
+ABILITY_EXPIRY_KEY = "questionwork:runtime:ability_expiry:last_run"
 _SCHEDULER_LEASE_RENEW_SCRIPT = """
 if redis.call('GET', KEYS[1]) == ARGV[1] then
     return redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
@@ -132,6 +139,20 @@ async def refresh_scheduler_runtime_heartbeat(
     )
 
 
+async def acquire_periodic_scheduler_slot(redis, *, slot_key: str, ttl_seconds: int) -> bool:
+    return bool(await redis.set(slot_key, "1", ex=max(ttl_seconds, 1), nx=True))
+
+
+async def run_lifecycle_scan(conn) -> None:
+    dormant_count = await lifecycle_service.scan_and_enqueue_dormant_clients(conn)
+    stale_count = await lifecycle_service.scan_and_enqueue_stale_shortlists(conn)
+    logger.info(
+        "Lifecycle scan complete: dormant_clients_enqueued=%s stale_shortlists_enqueued=%s",
+        dormant_count,
+        stale_count,
+    )
+
+
 async def scheduler_tick(
     conn,
     *,
@@ -167,6 +188,15 @@ async def scheduler_tick(
     if settings.EMAILS_ENABLED:
         await email_runtime_service.schedule_email_outbox_jobs(conn)
 
+    if settings.EMAILS_ENABLED and settings.LIFECYCLE_DELIVERY_JOBS_ENABLED:
+        try:
+            await lifecycle_runtime_service.schedule_due_lifecycle_jobs(
+                conn,
+                batch_limit=settings.LIFECYCLE_DELIVERY_BATCH_LIMIT,
+            )
+        except Exception:
+            logger.exception("Lifecycle delivery job scheduling failed during scheduler tick")
+
     if hasattr(conn, "fetchval"):
         try:
             await analytics_service.prune_old_events(
@@ -198,6 +228,32 @@ async def scheduler_tick(
                 await event_service.auto_end_due_events(conn)
         except Exception:
             logger.exception("Event lifecycle (activate/end) failed during scheduler tick")
+
+    # Saved search alert notifications
+    if settings.SAVED_SEARCH_ALERTS_ENABLED and hasattr(conn, "fetchval"):
+        try:
+            alerted = await saved_searches_service.run_alert_scan(
+                conn, batch_limit=settings.SAVED_SEARCH_ALERT_BATCH_LIMIT
+            )
+            if alerted:
+                logger.info("Saved search alerts: %d notification(s) sent", alerted)
+        except Exception:
+            logger.exception("Saved search alert scan failed during scheduler tick")
+
+    # RPG ability expiry (clears stale active_until rows, applies post-rage burnout)
+    if hasattr(conn, "fetchval"):
+        try:
+            await class_service.expire_stale_abilities(conn)
+        except Exception:
+            logger.exception("Ability expiry scan failed during scheduler tick")
+
+    # Weekly challenges seed (idempotent — creates challenges for current week if missing)
+    if settings.WEEKLY_CHALLENGES_ENABLED and hasattr(conn, "fetchval"):
+        try:
+            async with conn.transaction():
+                await challenge_service.ensure_weekly_challenges(conn)
+        except Exception:
+            logger.exception("Weekly challenges seed failed during scheduler tick")
 
     orphaned_count = retry_count = rescued_count = 0
 
@@ -267,12 +323,26 @@ async def run_scheduler_iteration(
         )
         return None
 
-    return await tick_callable(
+    result = await tick_callable(
         conn,
         enqueue_callable=enqueue_callable,
         scheduler_id=scheduler_id,
         now=iteration_now,
     )
+
+    if settings.LIFECYCLE_SCAN_ENABLED:
+        try:
+            should_run_scan = await acquire_periodic_scheduler_slot(
+                redis,
+                slot_key=LIFECYCLE_SCAN_INTERVAL_KEY,
+                ttl_seconds=settings.LIFECYCLE_SCAN_INTERVAL_SECONDS,
+            )
+            if should_run_scan:
+                await run_lifecycle_scan(conn)
+        except Exception:
+            logger.exception("Lifecycle scan failed during scheduler iteration")
+
+    return result
 
 
 async def run_scheduler_loop() -> None:

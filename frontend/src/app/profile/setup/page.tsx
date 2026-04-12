@@ -10,7 +10,7 @@ import Button from "@/components/ui/Button";
 import FreelancerOnboardingChecklist, {
   type OnboardingItem,
 } from "@/components/profile/FreelancerOnboardingChecklist";
-import { getUserProfile, updateMyProfile, getApiErrorMessage, type ApiError, type PublicUserProfile } from "@/lib/api";
+import { getUserProfile, updateMyProfile, getApiErrorMessage, type PublicUserProfile } from "@/lib/api";
 
 const AVAILABILITY_OPTIONS = [
   { value: "available", label: "Готов брать новые задачи" },

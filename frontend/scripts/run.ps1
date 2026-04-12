@@ -10,7 +10,7 @@ $FRONTEND_ROOT = Split-Path -Parent $PSScriptRoot
 Set-Location $FRONTEND_ROOT
 
 Write-Host "`nЗапуск Next.js dev сервера..." -ForegroundColor Yellow
-Write-Host "Открой браузер: http://localhost:3001" -ForegroundColor Green
+Write-Host "Открой браузер: http://localhost:3000" -ForegroundColor Green
 Write-Host "`nНажми Ctrl+C для остановки`n" -ForegroundColor Gray
 
 npm run dev

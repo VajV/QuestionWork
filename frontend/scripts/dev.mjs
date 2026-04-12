@@ -16,7 +16,7 @@ const hasPortArg = cliArgs.includes("--port") || cliArgs.includes("-p");
 const hasHostnameArg = cliArgs.includes("--hostname") || cliArgs.includes("-H");
 const defaultArgs = [
   ...(hasHostnameArg ? [] : ["--hostname", "127.0.0.1"]),
-  ...(hasPortArg ? [] : ["--port", "3001"]),
+  ...(hasPortArg ? [] : ["--port", "3000"]),
 ];
 const child = spawn(process.execPath, [nextBin, "dev", ...defaultArgs, ...cliArgs], {
   stdio: "inherit",

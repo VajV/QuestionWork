@@ -144,3 +144,21 @@ async def mark_command_cancelled(conn: asyncpg.Connection, command_id: str) -> a
         """,
         command_id,
     )
+
+
+async def reset_command_for_replay(conn: asyncpg.Connection, command_id: str) -> asyncpg.Record | None:
+    return await conn.fetchrow(
+        """
+        UPDATE command_requests
+        SET status = 'accepted',
+            started_at = NULL,
+            finished_at = NULL,
+            result_json = NULL,
+            error_code = NULL,
+            error_text = NULL,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+        """,
+        command_id,
+    )

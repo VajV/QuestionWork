@@ -216,6 +216,10 @@ async def mark_as_read(
 
     Returns True if updated, False if not found or not owned by user_id.
     """
+    if not conn.is_in_transaction():
+        raise RuntimeError(
+            "mark_as_read must be called inside an explicit DB transaction."
+        )
     result = await conn.execute(
         """
         UPDATE notifications
@@ -231,6 +235,10 @@ async def mark_as_read(
 
 async def mark_all_as_read(conn: asyncpg.Connection, user_id: str) -> int:
     """Mark ALL unread notifications for a user as read. Returns count updated."""
+    if not conn.is_in_transaction():
+        raise RuntimeError(
+            "mark_all_as_read must be called inside an explicit DB transaction."
+        )
     result = await conn.execute(
         "UPDATE notifications SET is_read = TRUE WHERE user_id = $1 AND is_read = FALSE",
         user_id,

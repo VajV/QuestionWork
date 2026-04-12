@@ -21,6 +21,8 @@ from app.models.quest import (
     QuestApplicationCreate,
     QuestCompletionCreate,
     QuestCreate,
+    QuestInviteCreate,
+    QuestInviteResponse,
     QuestListResponse,
     QuestRevisionRequest,
     QuestUpdate,
@@ -286,6 +288,38 @@ async def apply_to_quest(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=msg)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
     return {"message": "Application submitted successfully", "application": application}
+
+
+@router.post("/{quest_id}/invite", response_model=QuestInviteResponse)
+async def invite_freelancer(
+    quest_id: str,
+    invite_data: QuestInviteCreate,
+    request: Request,
+    current_user: UserProfile = Depends(require_auth),
+    conn: asyncpg.Connection = Depends(get_db_connection),
+):
+    """Пригласить фрилансера откликнуться на открытый квест."""
+    await _quest_mutation_rate_limit(
+        request,
+        current_user,
+        action="invite_freelancer",
+        limit=20,
+        window_seconds=60,
+    )
+    try:
+        return await quest_service.invite_freelancer_to_quest(
+            conn,
+            quest_id,
+            invite_data.freelancer_id,
+            current_user,
+        )
+    except ValueError as e:
+        msg = str(e)
+        if "not found" in msg.lower():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=msg)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
 
 @router.post("/{quest_id}/assign")

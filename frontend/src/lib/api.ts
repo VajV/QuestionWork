@@ -61,6 +61,10 @@ import type {
   AdminUsersResponse,
   AdminTransactionsResponse,
   AdminLogsResponse,
+  AdminOperationsFeedResponse,
+  AdminRuntimeHeartbeatsResponse,
+  AdminJobStatusResponse,
+  AdminJobReplayResponse,
   AdminQuestApplicationDetail,
   WithdrawalApproveResult,
   WithdrawalRejectResult,
@@ -2137,6 +2141,10 @@ export async function getShortlistIds(): Promise<string[]> {
   return fetchApi<string[]>("/shortlists/ids", undefined, true);
 }
 
+export async function getShortlistCount(): Promise<{ count: number }> {
+  return fetchApi<{ count: number }>("/shortlists/count", undefined, true);
+}
+
 export async function register(data: RegisterData): Promise<TokenResponse> {
   return fetchApi<TokenResponse>(
     "/auth/register",
@@ -2321,6 +2329,17 @@ export async function assignQuest(
     true,
   );
   return normalizeQuestWithMessageResponse(response);
+}
+
+export async function inviteFreelancerToQuest(
+  questId: string,
+  freelancerId: string,
+): Promise<{ quest_id: string; freelancer_id: string; already_sent: boolean; message: string }> {
+  return fetchApi(
+    `/quests/${questId}/invite`,
+    { method: "POST", body: JSON.stringify({ freelancer_id: freelancerId }) },
+    true,
+  );
 }
 
 /**
@@ -3483,6 +3502,49 @@ export async function adminGetLogs(
   return normalizeAdminLogsResponse(response);
 }
 
+/** GET /admin/operations — trust-layer operations feed */
+export async function adminGetOperations(
+  page = 1,
+  pageSize = 50,
+  filters?: { status?: string; action?: string; actor?: string },
+): Promise<AdminOperationsFeedResponse> {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  if (filters?.status) params.set("status", filters.status);
+  if (filters?.action) params.set("action", filters.action);
+  if (filters?.actor) params.set("actor", filters.actor);
+  return fetchApi<AdminOperationsFeedResponse>(buildCollectionEndpoint("/admin/operations", params), undefined, true);
+}
+
+/** GET /admin/runtime/heartbeats — worker/scheduler runtime status */
+export async function adminGetRuntimeHeartbeats(options?: {
+  runtimeKind?: string;
+  limit?: number;
+  activeOnly?: boolean;
+}): Promise<AdminRuntimeHeartbeatsResponse> {
+  const params = new URLSearchParams();
+  if (options?.runtimeKind) params.set("runtime_kind", options.runtimeKind);
+  if (options?.limit) params.set("limit", String(options.limit));
+  if (typeof options?.activeOnly === "boolean") params.set("active_only", String(options.activeOnly));
+  return fetchApi<AdminRuntimeHeartbeatsResponse>(buildCollectionEndpoint("/admin/runtime/heartbeats", params), undefined, true);
+}
+
+/** GET /admin/jobs/:id — trust-layer job detail */
+export async function adminGetJobStatus(jobId: string): Promise<AdminJobStatusResponse> {
+  return fetchApi<AdminJobStatusResponse>(`/admin/jobs/${jobId}`, undefined, true);
+}
+
+/** POST /admin/jobs/:id/requeue — manually replay failed or dead-letter job */
+export async function adminRequeueJob(jobId: string, reason?: string): Promise<AdminJobReplayResponse> {
+  return fetchApi<AdminJobReplayResponse>(
+    `/admin/jobs/${jobId}/requeue`,
+    { method: "POST", body: JSON.stringify({ reason: reason?.trim() || null }) },
+    true,
+  );
+}
+
 /** POST /admin/maintenance/cleanup-notifications */
 export async function adminCleanupNotifications(): Promise<{
   deleted: number;
@@ -3883,6 +3945,10 @@ const api = {
   adminApproveWithdrawal,
   adminRejectWithdrawal,
   adminGetLogs,
+  adminGetOperations,
+  adminGetRuntimeHeartbeats,
+  adminGetJobStatus,
+  adminRequeueJob,
   adminCleanupNotifications,
   adminSetupTotp,
   adminEnableTotp,
@@ -4001,4 +4067,159 @@ export async function fetchLearningChat(
     }
     throw error;
   }
+}
+
+// ============================================
+// Counter-offer API
+// ============================================
+
+export interface CounterOfferPayload {
+  counter_price: number;
+  message?: string;
+}
+
+export interface CounterOfferResponse {
+  application_id: string;
+  counter_offer_price: number | null;
+  counter_offer_status: "pending" | "accepted" | "declined" | null;
+  counter_offer_message: string | null;
+  counter_offered_at: string | null;
+  counter_responded_at: string | null;
+}
+
+/** Client sends a counter-offer on a freelancer's application. */
+export async function sendCounterOffer(
+  questId: string,
+  applicationId: string,
+  payload: CounterOfferPayload,
+): Promise<CounterOfferResponse> {
+  return fetchApi<CounterOfferResponse>(
+    `/quests/${questId}/applications/${applicationId}/counter-offer`,
+    { method: "POST", body: JSON.stringify(payload) },
+    true,
+  );
+}
+
+/** Freelancer accepts or declines a counter-offer. */
+export async function respondToCounterOffer(
+  questId: string,
+  applicationId: string,
+  accept: boolean,
+): Promise<CounterOfferResponse> {
+  return fetchApi<CounterOfferResponse>(
+    `/quests/${questId}/applications/${applicationId}/counter-offer/respond`,
+    { method: "POST", body: JSON.stringify({ accept }) },
+    true,
+  );
+}
+
+// ============================================
+// Milestone API
+// ============================================
+
+export interface Milestone {
+  id: string;
+  quest_id: string;
+  title: string;
+  description: string | null;
+  amount: number;
+  currency: string;
+  sort_order: number;
+  status: "draft" | "active" | "completed" | "cancelled";
+  due_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface MilestoneCreate {
+  title: string;
+  amount: number;
+  description?: string;
+  sort_order?: number;
+  due_at?: string;
+  currency?: string;
+}
+
+export async function getMilestones(questId: string): Promise<Milestone[]> {
+  return fetchApi<Milestone[]>(`/quests/${questId}/milestones`, {}, true);
+}
+
+export async function createMilestone(questId: string, payload: MilestoneCreate): Promise<Milestone> {
+  return fetchApi<Milestone>(
+    `/quests/${questId}/milestones`,
+    { method: "POST", body: JSON.stringify(payload) },
+    true,
+  );
+}
+
+export async function activateMilestone(questId: string, milestoneId: string): Promise<Milestone> {
+  return fetchApi<Milestone>(
+    `/quests/${questId}/milestones/${milestoneId}/activate`,
+    { method: "POST" },
+    true,
+  );
+}
+
+export async function completeMilestone(questId: string, milestoneId: string): Promise<Milestone> {
+  return fetchApi<Milestone>(
+    `/quests/${questId}/milestones/${milestoneId}/complete`,
+    { method: "POST" },
+    true,
+  );
+}
+
+export async function deleteMilestone(questId: string, milestoneId: string): Promise<void> {
+  return fetchApiVoid(
+    `/quests/${questId}/milestones/${milestoneId}`,
+    { method: "DELETE" },
+    true,
+  );
+}
+
+// ============================================
+// Weekly Challenges API
+// ============================================
+
+export interface WeeklyChallenge {
+  id: string;
+  challenge_type: string;
+  title: string;
+  description: string;
+  target_value: number;
+  xp_reward: number;
+  week_start: string;
+  current_value: number;
+  completed: boolean;
+  completed_at: string | null;
+  reward_granted: boolean;
+}
+
+export async function getWeeklyChallenges(): Promise<WeeklyChallenge[]> {
+  return fetchApi<WeeklyChallenge[]>("/challenges/weekly", {}, true);
+}
+
+// ============================================
+// Referral API
+// ============================================
+
+export interface ReferralInfo {
+  code: string | null;
+  total_referred: number;
+  rewarded_count: number;
+}
+
+export async function getMyReferralInfo(): Promise<ReferralInfo> {
+  return fetchApi<ReferralInfo>("/referrals/me", {}, true);
+}
+
+export async function generateReferralCode(): Promise<ReferralInfo> {
+  return fetchApi<ReferralInfo>("/referrals/generate", { method: "POST" }, true);
+}
+
+export async function applyReferralCode(code: string): Promise<{ referrer_id: string; applied: boolean }> {
+  return fetchApi<{ referrer_id: string; applied: boolean }>(
+    "/referrals/apply",
+    { method: "POST", body: JSON.stringify({ code }) },
+    true,
+  );
 }

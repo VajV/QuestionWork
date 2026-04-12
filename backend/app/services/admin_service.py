@@ -1861,9 +1861,37 @@ async def broadcast_notification(
     event_type: str,
     admin_id: str,
     ip_address: Optional[str] = None,
+    dry_run: bool = False,
+    idempotency_key: Optional[str] = None,
 ) -> dict:
-    """Send a notification to multiple users."""
+    """Send a notification to multiple users.
+
+    dry_run=True returns a preview of affected users without sending.
+    idempotency_key prevents duplicate broadcasts.
+    """
     _assert_in_transaction(conn)
+
+    # ── Idempotency check ─────────────────────────────────────────────
+    if idempotency_key:
+        existing = await conn.fetchrow(
+            """
+            SELECT new_value FROM admin_logs
+            WHERE action = 'notification_broadcast'
+              AND new_value::jsonb ->> 'idempotency_key' = $1
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            idempotency_key,
+        )
+        if existing:
+            prev = json.loads(existing["new_value"]) if existing["new_value"] else {}
+            return {
+                "total_recipients": prev.get("recipients", 0),
+                "sent": prev.get("sent", 0),
+                "title": prev.get("title", title),
+                "duplicate": True,
+                "idempotency_key": idempotency_key,
+                "message": "Broadcast with this idempotency_key was already sent.",
+            }
 
     recipient_ids = user_ids
     if not recipient_ids:
@@ -1872,11 +1900,29 @@ async def broadcast_notification(
 
     # P1-2 FIX: Batch-validate all user IDs in one query instead of N+1
     valid_ids_rows = await conn.fetch(
-        "SELECT id FROM users WHERE id = ANY($1::text[])",
+        "SELECT id, username FROM users WHERE id = ANY($1::text[])",
         recipient_ids,
     )
     valid_ids = {str(row["id"]) for row in valid_ids_rows}
 
+    # ── Dry-run: preview without sending ──────────────────────────────
+    if dry_run:
+        preview_users = [
+            {"id": str(row["id"]), "username": row["username"]}
+            for row in valid_ids_rows
+        ]
+        return {
+            "dry_run": True,
+            "total_recipients": len(recipient_ids),
+            "valid_recipients": len(valid_ids),
+            "invalid_ids": [uid for uid in recipient_ids if uid not in valid_ids],
+            "affected_users": preview_users[:50],
+            "title": title,
+            "message": message,
+            "event_type": event_type,
+        }
+
+    # ── Actual send ───────────────────────────────────────────────────
     sent = 0
     for uid in recipient_ids:
         if uid in valid_ids:
@@ -1885,15 +1931,31 @@ async def broadcast_notification(
             )
             sent += 1
 
+    log_new_value: Dict[str, Any] = {
+        "recipients": len(recipient_ids),
+        "sent": sent,
+        "title": title,
+    }
+    if idempotency_key:
+        log_new_value["idempotency_key"] = idempotency_key
+
     await log_admin_action(
         conn, admin_id=admin_id, action="notification_broadcast",
         target_type="system", target_id="broadcast",
         old_value=None,
-        new_value={"recipients": len(recipient_ids), "sent": sent, "title": title},
+        new_value=log_new_value,
         ip_address=ip_address,
     )
 
-    return {"total_recipients": len(recipient_ids), "sent": sent, "title": title}
+    result: Dict[str, Any] = {
+        "total_recipients": len(recipient_ids),
+        "sent": sent,
+        "title": title,
+    }
+    if idempotency_key:
+        result["idempotency_key"] = idempotency_key
+        result["duplicate"] = False
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────────
