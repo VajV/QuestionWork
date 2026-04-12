@@ -65,6 +65,7 @@ backend/uploads/
 # Local diagnostics / temporary files
 /_diag.txt
 /_write_plan.py
+/dump.rdb
 /frontend/_diag.txt
 /login_body.json
 /test_output*.json
